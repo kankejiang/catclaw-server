@@ -27,6 +27,30 @@ echo "║   🐾 CatClaw Server 一键安装      ║"
 echo "╚════════════════════════════════════╝"
 echo ""
 
+# ── 参数解析 ────────────────────────────────────────────────
+FORCE_CLEAN=false
+for arg in "$@"; do
+    case "$arg" in
+        -f|--force) FORCE_CLEAN=true ;;
+        -h|--help)
+            echo "用法: curl -fsSL URL | bash -s -- [选项]"
+            echo "选项:"
+            echo "  -f, --force   强制清理旧缓存后全新安装"
+            echo "  -h, --help    显示帮助"
+            echo ""
+            echo "环境变量:"
+            echo "  MUSIC_DIR     音乐目录"
+            echo "  INSTALL_DIR   安装目录"
+            echo "  HTTP_PORT     HTTP 端口 (默认 66880)"
+            exit 0
+            ;;
+    esac
+done
+
+if $FORCE_CLEAN; then
+    warn "强制清理模式：删除旧缓存..."
+fi
+
 # ── 检查 Docker ─────────────────────────────────────────────
 if ! command -v docker &>/dev/null; then
     warn "未找到 Docker"
@@ -73,6 +97,10 @@ echo ""
 
 # ── 克隆源码 ────────────────────────────────────────────────
 WORK_DIR="$INSTALL_DIR/src"
+if $FORCE_CLEAN; then
+    info "清理旧源码: $WORK_DIR"
+    rm -rf "$WORK_DIR"
+fi
 if [ -d "$WORK_DIR/.git" ]; then
     info "更新已有源码..."
     cd "$WORK_DIR"
@@ -108,7 +136,9 @@ if [ -d "$INSTALL_DIR/build_cache/gomod" ]; then
 fi
 
 info "构建 Docker 镜像 (首次约 2-3 分钟)..."
-docker build -t catclaw-server:latest "$WORK_DIR"
+BUILD_ARGS=""
+$FORCE_CLEAN && BUILD_ARGS="--no-cache"
+docker build $BUILD_ARGS -t catclaw-server:latest "$WORK_DIR"
 
 # ── 启动容器 ────────────────────────────────────────────────
 info "启动容器..."
