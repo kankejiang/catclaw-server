@@ -1,62 +1,120 @@
 #!/usr/bin/env bash
 # ============================================================
 #  CatClaw Server — 一键部署脚本
-#  支持: Docker / 直接运行二进制
+#  用法:  bash deploy.sh              (交互模式，推荐)
+#        MUSIC_DIR=/music bash deploy.sh
+#        bash deploy.sh docker|binary|systemd
 #  License: MIT
 # ============================================================
 
 set -euo pipefail
 
-# ── 配置（按需修改）────────────────────────────────────────
-MUSIC_DIR="${MUSIC_DIR:-/path/to/music}"      # 修改为你的音乐目录
-DATA_DIR="${DATA_DIR:-$HOME/.catclaw}"         # 数据库持久化目录
-HTTP_PORT="${HTTP_PORT:-66880}"                # HTTP 端口
-DHT_PORT="${DHT_PORT:-66881}"                  # DHT P2P 端口
-DEVICE_NAME="${DEVICE_NAME:-$(hostname)}"      # 设备名
-RATE_LIMIT="${RATE_LIMIT:-128}"                # 流媒体限速 KB/s
-BOOTSTRAP_NODES="${BOOTSTRAP_NODES:-music.08102516.xyz:6881}"
-DEPLOY_MODE="${DEPLOY_MODE:-docker}"           # docker | binary
-VERSION="${VERSION:-latest}"                   # 版本号或 latest
-# ────────────────────────────────────────────────────────────
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
+# ── 颜色 ────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[✓]${NC} $*"; }
 warn() { echo -e "${RED}[✗]${NC} $*"; }
 info() { echo -e "${CYAN}[i]${NC} $*"; }
+ask()  { echo -e "${YELLOW}[?]${NC} $*"; }
 
-cat << 'EOF'
-  🐾 CatClaw Server 部署脚本
-─────────────────────────────────
-EOF
+cat << 'BANNER'
+╔════════════════════════════════════╗
+║     🐾 CatClaw Server 部署脚本     ║
+╚════════════════════════════════════╝
+BANNER
 
-# ── 检查 ────────────────────────────────────────────────────
-if [ "$MUSIC_DIR" = "/path/to/music" ]; then
-    warn "请先设置 MUSIC_DIR 为你的音乐目录"
-    info "用法: MUSIC_DIR=/your/music bash deploy.sh"
-    exit 1
+# ── 配置 ────────────────────────────────────────────────────
+MUSIC_DIR="${MUSIC_DIR:-}"
+DATA_DIR="${DATA_DIR:-$HOME/.catclaw}"
+HTTP_PORT="${HTTP_PORT:-66880}"
+DHT_PORT="${DHT_PORT:-66881}"
+DEVICE_NAME="${DEVICE_NAME:-$(hostname 2>/dev/null || echo 'CatClaw')}"
+RATE_LIMIT="${RATE_LIMIT:-128}"
+BOOTSTRAP_NODES="${BOOTSTRAP_NODES:-music.08102516.xyz:6881}"
+VERSION="${VERSION:-latest}"
+DEPLOY_MODE="${DEPLOY_MODE:-auto}"   # auto | docker | binary | systemd
+
+# ── 解析命令行参数 ──────────────────────────────────────────
+for arg in "${@:-}"; do
+    case "$arg" in
+        docker|binary|systemd) DEPLOY_MODE="$arg" ;;
+        help|-h|--help)
+            echo "用法:  bash deploy.sh [docker|binary|systemd]"
+            echo ""
+            echo "  docker    - Docker 容器部署"
+            echo "  binary    - 下载二进制直接运行（前台）"
+            echo "  systemd   - 二进制 + systemd 服务（后台自启，推荐）"
+            echo ""
+            echo "环境变量:"
+            echo "  MUSIC_DIR       音乐目录 (必填)"
+            echo "  DEVICE_NAME     设备名称 (默认主机名)"
+            echo "  HTTP_PORT       HTTP 端口 (默认 66880)"
+            echo "  DHT_PORT        DHT 端口  (默认 66881)"
+            echo "  RATE_LIMIT      限速 KB/s  (默认 128)"
+            echo ""
+            echo "示例:"
+            echo "  MUSIC_DIR=/vol1/music bash deploy.sh"
+            echo "  MUSIC_DIR=/vol1/music bash deploy.sh systemd"
+            echo "  bash deploy.sh    # 交互模式"
+            exit 0
+            ;;
+    esac
+done
+
+# ── 交互式收集配置 ──────────────────────────────────────────
+if [ -z "$MUSIC_DIR" ]; then
+    echo ""
+    ask "请输入音乐文件存放目录（如 /vol1/music 或 /mnt/nas/music）"
+    read -r -p "  > " MUSIC_DIR
+    if [ -z "$MUSIC_DIR" ]; then
+        warn "未输入音乐目录，已取消"
+        exit 1
+    fi
 fi
 
 if [ ! -d "$MUSIC_DIR" ]; then
-    warn "音乐目录不存在: $MUSIC_DIR"
+    warn "目录不存在: $MUSIC_DIR"
+    info "请检查路径是否正确"
     exit 1
 fi
 
-mkdir -p "$DATA_DIR"
+# ── 自动选择部署模式 ────────────────────────────────────────
+if [ "$DEPLOY_MODE" = "auto" ]; then
+    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+        DEPLOY_MODE="docker"
+        info "检测到 Docker，使用 Docker 模式"
+    elif [ "$(id -u)" = "0" ] && [ -d /etc/systemd ]; then
+        DEPLOY_MODE="systemd"
+        info "检测到 root + systemd，使用 systemd 服务模式"
+    else
+        DEPLOY_MODE="binary"
+        info "使用二进制模式（前台运行）"
+    fi
+fi
+
+# ── 显示配置 ────────────────────────────────────────────────
+echo ""
+info "部署配置确认:"
+info "  模式:       $DEPLOY_MODE"
+info "  音乐目录:   $MUSIC_DIR"
+info "  数据目录:   $DATA_DIR"
+info "  HTTP 端口:  $HTTP_PORT"
+info "  DHT 端口:   $DHT_PORT"
+info "  设备名称:   $DEVICE_NAME"
+info "  限速:       ${RATE_LIMIT} KB/s"
+echo ""
 
 # ── Docker 模式 ─────────────────────────────────────────────
 deploy_docker() {
     if ! command -v docker &>/dev/null; then
-        warn "未找到 Docker，请先安装: https://docs.docker.com/engine/install/"
+        warn "未找到 Docker，请先安装"
+        info "飞牛OS: 在应用中心安装 Docker"
+        info "其他:   curl -fsSL https://get.docker.com | bash"
         exit 1
     fi
 
-    info "使用 Docker 模式部署"
-    info "  音乐目录: $MUSIC_DIR"
-    info "  数据目录: $DATA_DIR"
-    info "  HTTP 端口: $HTTP_PORT"
-    info "  DHT 端口:  $DHT_PORT"
-    info "  设备名称:  $DEVICE_NAME"
-    info "  限速:      ${RATE_LIMIT} KB/s"
+    mkdir -p "$DATA_DIR"
+
+    docker rm -f catclaw-server 2>/dev/null || true
 
     docker run -d \
         --name catclaw-server \
@@ -70,18 +128,24 @@ deploy_docker() {
         -e BOOTSTRAP_NODES="$BOOTSTRAP_NODES" \
         ghcr.io/kankejiang/catclaw-server:"$VERSION"
 
-    log "Docker 容器已启动！"
-    info "访问 http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):$HTTP_PORT"
+    sleep 2
+    IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost')
+    log "部署完成！"
+    info "Web UI:  http://${IP}:${HTTP_PORT}"
+    info "管理:    docker logs -f catclaw-server"
+    info "停止:    docker stop catclaw-server"
 }
 
 # ── 二进制模式 ──────────────────────────────────────────────
 deploy_binary() {
+    mkdir -p "$DATA_DIR"
+
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64)  ARCH="amd64" ;;
-        aarch64) ARCH="arm64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
         armv7l)  ARCH="armv7" ;;
-        *) warn "不支持的架构: $ARCH"; exit 1 ;;
+        *) warn "不支持的 CPU 架构: $ARCH"; exit 1 ;;
     esac
 
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -89,14 +153,22 @@ deploy_binary() {
     URL="https://github.com/kankejiang/catclaw-server/releases/download/v${VERSION}/${BINARY}"
 
     info "下载 $BINARY ..."
-    curl -L -o "$DATA_DIR/catclaw-server" "$URL" 2>/dev/null || {
-        warn "下载失败，请检查版本号或网络"
+    if command -v curl &>/dev/null; then
+        curl -L --progress-bar -o "$DATA_DIR/catclaw-server" "$URL"
+    elif command -v wget &>/dev/null; then
+        wget -O "$DATA_DIR/catclaw-server" "$URL"
+    else
+        warn "需要 curl 或 wget，请先安装"
         exit 1
-    }
+    fi
+
     chmod +x "$DATA_DIR/catclaw-server"
 
-    info "启动服务..."
-    "$DATA_DIR/catclaw-server" \
+    log "二进制已下载到 $DATA_DIR/catclaw-server"
+    log "启动 CatClaw Server..."
+    echo ""
+
+    exec "$DATA_DIR/catclaw-server" \
         --music-dir="$MUSIC_DIR" \
         --db-path="$DATA_DIR/catclaw.db" \
         --http-port="$HTTP_PORT" \
@@ -106,15 +178,49 @@ deploy_binary() {
         --device-name="$DEVICE_NAME"
 }
 
-# ── Systemd 服务 ────────────────────────────────────────────
-install_systemd() {
-    SERVICE_FILE="/etc/systemd/system/catclaw-server.service"
-    info "安装 systemd 服务到 $SERVICE_FILE"
+# ── Systemd 模式 ────────────────────────────────────────────
+deploy_systemd() {
+    if [ "$(id -u)" != "0" ]; then
+        warn "systemd 模式需要 root 权限"
+        info "请用: sudo bash deploy.sh systemd"
+        exit 1
+    fi
 
-    cat > "$SERVICE_FILE" << SERVICE_EOF
+    mkdir -p "$DATA_DIR"
+
+    # 下载二进制（不上传 stdout，等下载完）
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        armv7l)  ARCH="armv7" ;;
+        *) warn "不支持的 CPU 架构: $ARCH"; exit 1 ;;
+    esac
+
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    BINARY="catclaw-server-${OS}-${ARCH}"
+    URL="https://github.com/kankejiang/catclaw-server/releases/download/v${VERSION}/${BINARY}"
+
+    info "下载 $BINARY ..."
+    if command -v curl &>/dev/null; then
+        curl -L --progress-bar -o "$DATA_DIR/catclaw-server" "$URL"
+    elif command -v wget &>/dev/null; then
+        wget -O "$DATA_DIR/catclaw-server" "$URL"
+    else
+        warn "需要 curl 或 wget"
+        exit 1
+    fi
+    chmod +x "$DATA_DIR/catclaw-server"
+
+    # 创建 systemd 服务
+    SERVICE_FILE="/etc/systemd/system/catclaw-server.service"
+    info "创建 systemd 服务: $SERVICE_FILE"
+
+    cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=CatClaw Music Server
-After=network.target
+Description=CatClaw P2P Music Server
+After=network.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -127,40 +233,34 @@ ExecStart=$DATA_DIR/catclaw-server \\
     --rate-limit=$RATE_LIMIT \\
     --device-name=$DEVICE_NAME
 Restart=always
-RestartSec=5
+RestartSec=10
+User=root
 
 [Install]
 WantedBy=multi-user.target
-SERVICE_EOF
+EOF
 
     systemctl daemon-reload
     systemctl enable catclaw-server
-    systemctl start catclaw-server
+    systemctl restart catclaw-server
 
-    log "systemd 服务已安装并启动"
-    info "systemctl status catclaw-server  查看状态"
-    info "systemctl stop catclaw-server    停止服务"
+    sleep 2
+    IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost')
+    echo ""
+    log "部署完成！服务已开机自启"
+    echo ""
+    info "常用命令:"
+    info "  systemctl status catclaw-server   查看状态"
+    info "  journalctl -u catclaw-server -f   实时日志"
+    info "  systemctl restart catclaw-server  重启服务"
+    info "  systemctl stop catclaw-server     停止服务"
+    echo ""
+    info "Web UI:  http://${IP}:${HTTP_PORT}"
 }
 
-# ── 主流程 ──────────────────────────────────────────────────
-case "${1:-}" in
-    docker|binary) DEPLOY_MODE="$1" ;;
-    systemd)
-        deploy_binary &>/dev/null &
-        sleep 2
-        install_systemd
-        exit 0
-        ;;
-    help|-h|--help)
-        echo "用法: bash deploy.sh [docker|binary|systemd]"
-        echo "  docker   - Docker 容器部署（默认）"
-        echo "  binary   - 下载二进制直接运行"
-        echo "  systemd  - 二进制 + systemd 服务（推荐服务器）"
-        exit 0
-        ;;
-esac
-
+# ── 执行 ────────────────────────────────────────────────────
 case "$DEPLOY_MODE" in
-    docker) deploy_docker ;;
-    binary) deploy_binary ;;
+    docker)   deploy_docker ;;
+    binary)   deploy_binary ;;
+    systemd)  deploy_systemd ;;
 esac
