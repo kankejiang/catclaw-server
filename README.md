@@ -23,7 +23,7 @@
 ### 方式一：Docker 编译安装（推荐）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/master/installCatClawServer.sh | bash
 ```
 
 > 自动克隆源码 → Docker 构建 → 启动容器。国内网络慢可改用方式二。
@@ -37,7 +37,7 @@ wget https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.s
 ### 方式三：指定音乐目录，跳过交互
 
 ```bash
-MUSIC_DIR=/vol1/music bash -c "$(curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/master/install.sh)"
+MUSIC_DIR=/vol1/music bash -c "$(curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/master/installCatClawServer.sh)"
 ```
 
 ---
