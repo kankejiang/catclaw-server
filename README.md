@@ -18,18 +18,20 @@
 
 ---
 
-## 📦 一鍵部署（Docker）
+## 📦 一键部署
+
+复制下面一条命令到终端即可：
 
 ```bash
-# 下载部署脚本（二选一）
-curl -O https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh
-# 或
-wget https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh
-
-# 编辑配置后运行
-vim deploy.sh   # 修改 MUSIC_DIR 为你的音乐目录
-bash deploy.sh
+wget https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh && bash deploy.sh
 ```
+
+> 脚本会交互式询问你的音乐目录，输入路径后自动安装。
+>
+> 跳过交互，一行搞定：
+> ```bash
+> MUSIC_DIR=/vol1/music bash -c "$(wget -qO- https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh)" deploy.sh
+> ```
 
 ---
 
