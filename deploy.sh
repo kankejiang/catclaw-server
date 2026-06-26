@@ -93,11 +93,13 @@ if [ "$DEPLOY_MODE" = "auto" ]; then
         DEPLOY_MODE="docker"
         info "检测到 Docker，使用 Docker 模式"
     elif [ "$(id -u)" = "0" ] && [ -d /etc/systemd ]; then
+        info "未检测到 Docker，尝试 systemd 模式"
+        info "（需要预编译二进制，如失败请安装 Docker 后重试）"
         DEPLOY_MODE="systemd"
-        info "检测到 root + systemd，使用 systemd 服务模式"
     else
+        info "未检测到 Docker，尝试二进制模式"
+        info "（需要预编译二进制，如失败请安装 Docker 后重试）"
         DEPLOY_MODE="binary"
-        info "使用二进制模式（前台运行）"
     fi
 fi
 
@@ -172,20 +174,32 @@ deploy_binary() {
         exit 1
     fi
 
-    chmod +x "$DATA_DIR/catclaw-server"
-
-    log "二进制已下载到 $DATA_DIR/catclaw-server"
-    log "启动 CatClaw Server..."
-    echo ""
-
-    exec "$DATA_DIR/catclaw-server" \
-        --music-dir="$MUSIC_DIR" \
-        --db-path="$DATA_DIR/catclaw.db" \
-        --http-port="$HTTP_PORT" \
-        --dht-port="$DHT_PORT" \
-        --bootstrap="$BOOTSTRAP_NODES" \
-        --rate-limit="$RATE_LIMIT" \
-        --device-name="$DEVICE_NAME"
+    # Check if we got a valid ELF binary or junk (HTML 404)
+    if file "$DATA_DIR/catclaw-server" 2>/dev/null | grep -qi 'ELF'; then
+        chmod +x "$DATA_DIR/catclaw-server"
+        log "二进制已下载到 $DATA_DIR/catclaw-server"
+        log "启动 CatClaw Server..."
+        echo ""
+        exec "$DATA_DIR/catclaw-server" \
+            --music-dir="$MUSIC_DIR" \
+            --db-path="$DATA_DIR/catclaw.db" \
+            --http-port="$HTTP_PORT" \
+            --dht-port="$DHT_PORT" \
+            --bootstrap="$BOOTSTRAP_NODES" \
+            --rate-limit="$RATE_LIMIT" \
+            --device-name="$DEVICE_NAME"
+    else
+        warn "预编译二进制尚未发布 (v${VERSION})"
+        info ""
+        info "替代方案:"
+        info "  1) Docker 部署:  bash deploy.sh docker"
+        if command -v go &>/dev/null; then
+            info "  2) 源码编译:      git clone ... && go build"
+        fi
+        info ""
+        info "Web UI 访问地址: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'YOUR_IP'):${HTTP_PORT}"
+        exit 1
+    fi
 }
 
 # ── Systemd 模式 ────────────────────────────────────────────
@@ -221,6 +235,12 @@ deploy_systemd() {
         exit 1
     fi
     chmod +x "$DATA_DIR/catclaw-server"
+
+    # Check valid binary
+    if ! file "$DATA_DIR/catclaw-server" 2>/dev/null | grep -qi 'ELF'; then
+        warn "预编译二进制尚未发布，请使用 Docker 部署: bash deploy.sh docker"
+        exit 1
+    fi
 
     # 创建 systemd 服务
     SERVICE_FILE="/etc/systemd/system/catclaw-server.service"
