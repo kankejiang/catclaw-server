@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dhowden/tag"
@@ -15,6 +16,7 @@ import (
 // Scanner scans a music directory and stores metadata in the database.
 type Scanner struct {
 	musicDir string
+	mu       sync.RWMutex
 	database *db.Database
 }
 
@@ -24,6 +26,20 @@ func New(musicDir string, database *db.Database) *Scanner {
 		musicDir: musicDir,
 		database: database,
 	}
+}
+
+// MusicDir returns the current music directory.
+func (s *Scanner) MusicDir() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.musicDir
+}
+
+// SetMusicDir updates the music directory.
+func (s *Scanner) SetMusicDir(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.musicDir = dir
 }
 
 // ScanResult holds the result of a scan.
@@ -38,10 +54,11 @@ type ScanResult struct {
 func (s *Scanner) Scan() (*ScanResult, error) {
 	start := time.Now()
 	result := &ScanResult{}
+	dir := s.MusicDir()
 
-	log.Printf("[scanner] Starting scan of %s", s.musicDir)
+	log.Printf("[scanner] Starting scan of %s", dir)
 
-	err := filepath.Walk(s.musicDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			result.Errors++
 			return nil // Skip files we can't access

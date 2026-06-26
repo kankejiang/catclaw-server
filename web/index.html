@@ -76,6 +76,11 @@
 
   <div class="section">
     <h2>🔍 音乐库扫描</h2>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <span style="color:var(--text2)">目录:</span>
+      <input id="music-dir-input" style="flex:1;min-width:250px;padding:8px 12px;border-radius:8px;border:1px solid #333;background:#1a1a2e;color:var(--text);font-size:0.9em" placeholder="/vol1/music">
+      <button onclick="saveMusicDir()">保存</button>
+    </div>
     <button id="scan-btn" onclick="startScan()">开始扫描</button>
     <span id="scan-msg" style="margin-left:12px;font-size:0.85em"></span>
   </div>
@@ -94,6 +99,31 @@ async function loadStatus() {
   document.getElementById('stat-peers').textContent = d.dht_peers || 0;
   document.getElementById('rate-slider').value = d.rate_limit || 131072;
   document.getElementById('rate-label').textContent = formatRate(d.rate_limit);
+}
+
+async function loadMusicDir() {
+  try {
+    const r = await fetch(API+'/config/musicdir');
+    const d = await r.json();
+    document.getElementById('music-dir-input').value = d.music_dir || '';
+  } catch(e) { /* ignore */ }
+}
+
+async function saveMusicDir() {
+  const dir = document.getElementById('music-dir-input').value.trim();
+  if (!dir) return;
+  try {
+    await fetch(API+'/config/musicdir', {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({music_dir: dir})
+    });
+    document.getElementById('scan-msg').textContent = '✓ 目录已更新: ' + dir;
+    document.getElementById('scan-msg').style.color = '#4ade80';
+  } catch(e) {
+    document.getElementById('scan-msg').textContent = '保存失败';
+    document.getElementById('scan-msg').style.color = '#f87171';
+  }
 }
 
 async function refreshDevices() {
@@ -172,6 +202,7 @@ function h(s) {
 }
 
 loadStatus();
+loadMusicDir();
 refreshDevices();
 refreshContacts();
 setInterval(loadStatus, 30000);
