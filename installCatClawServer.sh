@@ -59,12 +59,18 @@ if ! command -v docker &>/dev/null; then
     exit 1
 fi
 
-# 检查 docker 权限
+# 检查 docker 权限，自动尝试 sudo
+DOCKER_CMD="docker"
 if ! docker info &>/dev/null 2>&1; then
-    warn "当前用户没有 Docker 权限"
-    info "请将用户加入 docker 组: sudo usermod -aG docker \$USER"
-    info "然后重新登录，或使用:  sudo bash install.sh"
-    exit 1
+    if command -v sudo &>/dev/null && sudo docker info &>/dev/null 2>&1; then
+        DOCKER_CMD="sudo docker"
+        info "自动使用 sudo 运行 Docker 命令"
+    else
+        warn "当前用户没有 Docker 权限"
+        info "请执行:  sudo usermod -aG docker \$USER && newgrp docker"
+        info "或手动:   curl ... | sudo bash"
+        exit 1
+    fi
 fi
 
 # ── 音乐目录 ────────────────────────────────────────────────
@@ -138,17 +144,17 @@ fi
 info "构建 Docker 镜像 (首次约 2-3 分钟)..."
 BUILD_ARGS=""
 $FORCE_CLEAN && BUILD_ARGS="--no-cache"
-docker build $BUILD_ARGS -t catclaw-server:latest "$WORK_DIR"
+$DOCKER_CMD build $BUILD_ARGS -t catclaw-server:latest "$WORK_DIR"
 
 # ── 启动容器 ────────────────────────────────────────────────
 info "启动容器..."
 
 # 停止并删除旧容器
-docker rm -f catclaw-server 2>/dev/null || true
+$DOCKER_CMD rm -f catclaw-server 2>/dev/null || true
 
 mkdir -p "$INSTALL_DIR/data"
 
-docker run -d \
+$DOCKER_CMD run -d \
     --name catclaw-server \
     --restart unless-stopped \
     -p "$HTTP_PORT:66880" \
