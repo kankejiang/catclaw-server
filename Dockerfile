@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /build
 
@@ -16,16 +16,16 @@ COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /catclaw-server .
 
 # Runtime stage
-FROM alpine:3.19
+FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates sqlite-libs
+RUN apk add --no-cache ca-certificates sqlite-libs tzdata
 
 COPY --from=builder /catclaw-server /catclaw-server
 
 # Create volume directories
 RUN mkdir -p /music /data
 
-EXPOSE 5000
+EXPOSE 66880
 EXPOSE 66881/udp
 
 ENV MUSIC_DIR=/music

@@ -6,7 +6,7 @@ services:
     container_name: catclaw-server
     restart: unless-stopped
     ports:
-      - "5000:5000"       # HTTP API + Web UI
+      - "66880:66880"       # HTTP API + Web UI
       - "66881:66881/udp"   # DHT P2P
     volumes:
       - /path/to/music:/music:ro   # Music directory (read-only)
@@ -19,7 +19,7 @@ services:
     # command:
     #   - "--music-dir=/music"
     #   - "--db-path=/data/catclaw.db"
-    #   - "--http-port=5000"
+    #   - "--http-port=66880"
     #   - "--dht-port=66881"
     #   - "--bootstrap=music.08102516.xyz:6881"
     #   - "--rate-limit=128"
