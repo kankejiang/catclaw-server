@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐾 CatClaw Server</title>
+<style>
+  :root { --bg: #1a1a2e; --card: #16213e; --accent: #e94560; --text: #eee; --text2: #aaa; }
+  * { box-sizing:border-box;margin:0;padding:0 }
+  body { font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  header { background: var(--card); padding: 20px 30px; display:flex; align-items:center; gap:12px; border-bottom: 1px solid #333; }
+  header h1 { font-size: 1.3em; }
+  main { max-width: 1000px; margin: 0 auto; padding: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: var(--card); border-radius: 12px; padding: 20px; }
+  .card h3 { font-size: 0.85em; color: var(--text2); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+  .card .value { font-size: 2em; font-weight: bold; color: var(--accent); }
+  .section { background: var(--card); border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+  .section h2 { font-size: 1.1em; margin-bottom: 16px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #2a2a4a; }
+  th { color: var(--text2); font-size: 0.8em; font-weight: 600; }
+  td { font-size: 0.9em; }
+  button { background: var(--accent); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 0.9em; }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  input[type=range] { width: 200px; accent-color: var(--accent); }
+  .rate-display { display: flex; gap: 12px; align-items: center; margin: 10px 0; }
+  .status { color: #4ade80; } .status-off { color: #f87171; }
+  .tr { text-align: right; } .tc { text-align: center; }
+  .loading { color: var(--text2); font-style: italic; }
+</style>
+</head>
+<body>
+<header>
+  <span style="font-size:1.5em">🐾</span>
+  <h1>CatClaw Server</h1>
+  <span style="flex:1"></span>
+  <span id="device-name" style="color:var(--text2)">...</span>
+</header>
+<main>
+  <div class="grid" id="status-grid">
+    <div class="card"><h3>歌曲总数</h3><div class="value" id="stat-songs">-</div></div>
+    <div class="card"><h3>艺术家</h3><div class="value" id="stat-artists">-</div></div>
+    <div class="card"><h3>专辑</h3><div class="value" id="stat-albums">-</div></div>
+    <div class="card"><h3>P2P 节点</h3><div class="value" id="stat-peers">-</div></div>
+  </div>
+
+  <div class="section">
+    <h2>⚡ 速限控制</h2>
+    <div class="rate-display">
+      <input type="range" id="rate-slider" min="0" max="10240" value="131072" step="128">
+      <span id="rate-label">128 KB/s</span>
+    </div>
+    <button id="rate-apply">应用</button>
+    <span id="rate-msg" style="margin-left:12px;font-size:0.85em"></span>
+  </div>
+
+  <div class="section">
+    <h2>📡 P2P 设备</h2>
+    <table>
+      <thead><tr><th>设备名</th><th>IP</th><th>HTTP 端口</th><th>DHT 端口</th></tr></thead>
+      <tbody id="device-tbody"><tr><td colspan="4" class="loading">加载中...</td></tr></tbody>
+    </table>
+    <button style="margin-top:12px" onclick="refreshDevices()">刷新</button>
+  </div>
+
+  <div class="section">
+    <h2>📋 DHT 路由表 (已知节点)</h2>
+    <table>
+      <thead><tr><th>节点 ID</th><th>IP</th><th>端口</th></tr></thead>
+      <tbody id="contact-tbody"><tr><td colspan="3" class="loading">加载中...</td></tr></tbody>
+    </table>
+    <button style="margin-top:12px" onclick="refreshContacts()">刷新</button>
+  </div>
+
+  <div class="section">
+    <h2>🔍 音乐库扫描</h2>
+    <button id="scan-btn" onclick="startScan()">开始扫描</button>
+    <span id="scan-msg" style="margin-left:12px;font-size:0.85em"></span>
+  </div>
+</main>
+
+<script>
+const API = '/api';
+
+async function loadStatus() {
+  const r = await fetch(API+'/status');
+  const d = await r.json();
+  document.getElementById('device-name').textContent = '设备: ' + (d.device || '?');
+  document.getElementById('stat-songs').textContent = d.songs || 0;
+  document.getElementById('stat-artists').textContent = d.artists || 0;
+  document.getElementById('stat-albums').textContent = d.albums || 0;
+  document.getElementById('stat-peers').textContent = d.dht_peers || 0;
+  document.getElementById('rate-slider').value = d.rate_limit || 131072;
+  document.getElementById('rate-label').textContent = formatRate(d.rate_limit);
+}
+
+async function refreshDevices() {
+  const r = await fetch(API+'/dht/devices');
+  const devices = await r.json();
+  const tbody = document.getElementById('device-tbody');
+  if (!devices || devices.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="tc">暂无设备</td></tr>';
+    return;
+  }
+  tbody.innerHTML = devices.map(d =>
+    `<tr><td>${h(d.name||'?')}</td><td>${h(d.ip||'?')}</td><td class="tr">${d.http_port||'-'}</td><td class="tr">${d.dht_port||'-'}</td></tr>`
+  ).join('');
+}
+
+async function refreshContacts() {
+  const r = await fetch(API+'/dht/contacts');
+  const contacts = await r.json();
+  const tbody = document.getElementById('contact-tbody');
+  if (!contacts || contacts.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" class="tc">暂无节点</td></tr>';
+    return;
+  }
+  tbody.innerHTML = contacts.map(c =>
+    `<tr><td>${h(c.id).substring(0,16)}...</td><td>${h(c.ip)}</td><td class="tr">${c.port}</td></tr>`
+  ).join('');
+}
+
+async function startScan() {
+  const btn = document.getElementById('scan-btn');
+  const msg = document.getElementById('scan-msg');
+  btn.disabled = true;
+  msg.textContent = '扫描中...';
+  try {
+    const r = await fetch(API+'/scan', {method:'POST'});
+    const d = await r.json();
+    msg.textContent = `完成！${d.total} 个文件，${d.new} 首新歌，${d.errors} 个错误，耗时 ${d.duration}`;
+    loadStatus();
+  } catch(e) {
+    msg.textContent = '扫描失败: '+e.message;
+  }
+  btn.disabled = false;
+}
+
+document.getElementById('rate-slider').addEventListener('input', function() {
+  document.getElementById('rate-label').textContent = formatRate(parseInt(this.value));
+});
+
+document.getElementById('rate-apply').addEventListener('click', async function() {
+  const rate = parseInt(document.getElementById('rate-slider').value);
+  const msg = document.getElementById('rate-msg');
+  try {
+    await fetch(API+'/config/ratelimit', {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({rate_limit: rate})
+    });
+    msg.textContent = '✓ 已更新为 ' + formatRate(rate);
+    msg.style.color = '#4ade80';
+  } catch(e) {
+    msg.textContent = '更新失败';
+    msg.style.color = '#f87171';
+  }
+});
+
+function formatRate(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return '无限制';
+  if (bytesPerSec < 1024) return bytesPerSec + ' B/s';
+  if (bytesPerSec < 1048576) return (bytesPerSec / 1024).toFixed(0) + ' KB/s';
+  return (bytesPerSec / 1048576).toFixed(1) + ' MB/s';
+}
+
+function h(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+loadStatus();
+refreshDevices();
+refreshContacts();
+setInterval(loadStatus, 30000);
+</script>
+</body>
+</html>
