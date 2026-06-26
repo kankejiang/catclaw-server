@@ -7,7 +7,7 @@
 
 set -e
 
-INSTALL_DIR="${INSTALL_DIR:-/opt/catclaw}"
+INSTALL_DIR="${INSTALL_DIR:-$([ "$(id -u)" = "0" ] && echo /opt/catclaw || echo $HOME/.catclaw)}"
 MUSIC_DIR="${MUSIC_DIR:-}"
 HTTP_PORT="${HTTP_PORT:-66880}"
 DHT_PORT="${DHT_PORT:-66881}"
@@ -35,6 +35,14 @@ if ! command -v docker &>/dev/null; then
     exit 1
 fi
 
+# 检查 docker 权限
+if ! docker info &>/dev/null 2>&1; then
+    warn "当前用户没有 Docker 权限"
+    info "请将用户加入 docker 组: sudo usermod -aG docker \$USER"
+    info "然后重新登录，或使用:  sudo bash install.sh"
+    exit 1
+fi
+
 # ── 音乐目录 ────────────────────────────────────────────────
 if [ -z "$MUSIC_DIR" ]; then
     for dir in "/vol1/music" "/volume1/music" "/mnt/music" "/mnt/nas/music" "/media/music" "$HOME/music" "$HOME/Music"; do
@@ -49,7 +57,12 @@ fi
 [ ! -d "$MUSIC_DIR" ] && mkdir -p "$MUSIC_DIR" 2>/dev/null || true
 
 # ── 创建安装目录 ────────────────────────────────────────────
-mkdir -p "$INSTALL_DIR/build_cache"
+mkdir -p "$INSTALL_DIR/build_cache" 2>/dev/null || {
+    warn "无法创建 $INSTALL_DIR"
+    info "请使用 sudo 运行:  curl ... | sudo bash"
+    info "或指定用户目录: INSTALL_DIR=\$HOME/.catclaw bash install.sh"
+    exit 1
+}
 
 info "安装目录: $INSTALL_DIR"
 info "音乐目录: $MUSIC_DIR"
