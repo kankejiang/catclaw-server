@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# ============================================================
+#  CatClaw Server — Docker 一键安装（Gitee 镜像，国内用户推荐）
+#  用法:  curl -fsSL https://gitee.com/kankejiang/catclaw-server/raw/master/installCatClawServer_gitee.sh | bash
+#        MUSIC_DIR=/vol1/music bash installCatClawServer_gitee.sh
+# ============================================================
+
+set -e
+
+INSTALL_DIR="${INSTALL_DIR:-$([ "$(id -u)" = "0" ] && echo /opt/catclaw || echo $HOME/.catclaw)}"
+MUSIC_DIR="${MUSIC_DIR:-}"
+HTTP_PORT="${HTTP_PORT:-66880}"
+DHT_PORT="${DHT_PORT:-66881}"
+DEVICE_NAME="${DEVICE_NAME:-$(hostname 2>/dev/null || echo 'CatClaw')}"
+RATE_LIMIT="${RATE_LIMIT:-128}"
+BOOTSTRAP_NODES="${BOOTSTRAP_NODES:-music.08102516.xyz:6881}"
+REPO_URL="${REPO_URL:-https://gitee.com/kankejiang/catclaw-server.git}"
+GIT_BRANCH="${GIT_BRANCH:-master}"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
+log()  { echo -e "${GREEN}[✓]${NC} $*"; }
+warn() { echo -e "${RED}[✗]${NC} $*"; }
+info() { echo -e "${CYAN}[i]${NC} $*"; }
+
+echo "╔════════════════════════════════════╗"
+echo "║   🐾 CatClaw Server 一键安装      ║"
+echo "║        (Gitee 镜像 · 国内)        ║"
+echo "╚════════════════════════════════════╝"
+echo ""
+
+# ── 参数解析 ────────────────────────────────────────────────
+FORCE_CLEAN=false
+for arg in "$@"; do
+    case "$arg" in
+        -f|--force) FORCE_CLEAN=true ;;
+        -h|--help)
+            echo "用法: curl -fsSL URL | bash -s -- [选项]"
+            echo "选项:"
+            echo "  -f, --force   强制清理旧缓存后全新安装"
+            echo "  -h, --help    显示帮助"
+            echo ""
+            echo "环境变量:"
+            echo "  MUSIC_DIR     音乐目录"
+            echo "  INSTALL_DIR   安装目录"
+            echo "  HTTP_PORT     HTTP 端口 (默认 66880)"
+            exit 0
+            ;;
+    esac
+done
+
+if $FORCE_CLEAN; then
+    warn "强制清理模式：删除旧缓存..."
+fi
+
+# ── 检查 Docker ─────────────────────────────────────────────
+if ! command -v docker &>/dev/null; then
+    warn "未找到 Docker"
+    info "飞牛OS: 在应用中心安装 Docker"
+    info "其他:   curl -fsSL https://get.docker.com | bash"
+    exit 1
+fi
+
+# 检查 docker 权限，自动尝试 sudo
+DOCKER_CMD="docker"
+if ! docker info &>/dev/null 2>&1; then
+    if command -v sudo &>/dev/null && sudo docker info &>/dev/null 2>&1; then
+        DOCKER_CMD="sudo docker"
+        info "自动使用 sudo 运行 Docker 命令"
+    else
+        warn "当前用户没有 Docker 权限"
+        info "请执行:  sudo usermod -aG docker \$USER && newgrp docker"
+        info "或手动:   curl ... | sudo bash"
+        exit 1
+    fi
+fi
+
+# ── 音乐目录 ────────────────────────────────────────────────
+if [ -z "$MUSIC_DIR" ]; then
+    for dir in "/vol1/music" "/volume1/music" "/mnt/music" "/mnt/nas/music" "/media/music" "$HOME/music" "$HOME/Music"; do
+        [ -d "$dir" ] && { MUSIC_DIR="$dir"; break; }
+    done
+    if [ -z "$MUSIC_DIR" ]; then
+        info "未检测到音乐目录，使用默认路径 /vol1/music"
+        info "安装后可在 Web UI 中修改"
+        MUSIC_DIR="/vol1/music"
+    fi
+fi
+[ ! -d "$MUSIC_DIR" ] && mkdir -p "$MUSIC_DIR" 2>/dev/null || true
+
+# ── 创建安装目录 ────────────────────────────────────────────
+mkdir -p "$INSTALL_DIR/build_cache" 2>/dev/null || {
+    warn "无法创建 $INSTALL_DIR"
+    info "请使用 sudo 运行:  curl ... | sudo bash"
+    info "或指定用户目录: INSTALL_DIR=\$HOME/.catclaw bash installCatClawServer_gitee.sh"
+    exit 1
+}
+
+info "安装目录: $INSTALL_DIR"
+info "音乐目录: $MUSIC_DIR"
+info "HTTP 端口: $HTTP_PORT"
+info "DHT 端口:  $DHT_PORT"
+info "设备名称:  $DEVICE_NAME"
+echo ""
+
+# ── 克隆源码 ────────────────────────────────────────────────
+WORK_DIR="$INSTALL_DIR/src"
+if $FORCE_CLEAN; then
+    info "清理旧源码: $WORK_DIR"
+    rm -rf "$WORK_DIR"
+fi
+if [ -d "$WORK_DIR/.git" ]; then
+    info "更新已有源码..."
+    cd "$WORK_DIR"
+    git fetch origin "$GIT_BRANCH" 2>/dev/null || true
+    git checkout "$GIT_BRANCH" 2>/dev/null || true
+    git pull origin "$GIT_BRANCH" 2>/dev/null || true
+else
+    info "从 Gitee 克隆源码 (国内镜像)..."
+    rm -rf "$WORK_DIR"
+    if command -v git &>/dev/null; then
+        git clone --depth 1 --branch "$GIT_BRANCH" "$REPO_URL" "$WORK_DIR" || {
+            warn "Gitee 克隆失败，尝试 GitHub..."
+            git clone --depth 1 --branch "$GIT_BRANCH" "https://github.com/kankejiang/catclaw-server.git" "$WORK_DIR"
+        }
+    else
+        warn "未安装 git，尝试下载 tar.gz..."
+        TARBALL="$INSTALL_DIR/source.tar.gz"
+        wget -O "$TARBALL" "https://gitee.com/kankejiang/catclaw-server/repository/archive/${GIT_BRANCH}.tar.gz" 2>/dev/null \
+            || curl -L -o "$TARBALL" "https://gitee.com/kankejiang/catclaw-server/repository/archive/${GIT_BRANCH}.tar.gz" \
+            || { warn "下载失败"; exit 1; }
+        tar xzf "$TARBALL" -C "$INSTALL_DIR"
+        rm -f "$TARBALL"
+        mv "$INSTALL_DIR/catclaw-server" "$WORK_DIR" 2>/dev/null || true
+    fi
+fi
+log "源码就绪: $WORK_DIR"
+
+# ── 构建并启动 ──────────────────────────────────────────────
+cd "$WORK_DIR"
+
+# Copy go module cache from previous build (speed up rebuilds)
+if [ -d "$INSTALL_DIR/build_cache/gomod" ]; then
+    mkdir -p "$WORK_DIR/go-mod-cache"
+    cp -r "$INSTALL_DIR/build_cache/gomod"/* "$WORK_DIR/go-mod-cache/" 2>/dev/null || true
+fi
+
+info "构建 Docker 镜像 (首次约 2-3 分钟)..."
+BUILD_ARGS=""
+$FORCE_CLEAN && BUILD_ARGS="--no-cache"
+$DOCKER_CMD build $BUILD_ARGS -t catclaw-server:latest "$WORK_DIR"
+
+# ── 启动容器 ────────────────────────────────────────────────
+info "启动容器..."
+
+# 停止并删除旧容器
+$DOCKER_CMD rm -f catclaw-server 2>/dev/null || true
+
+mkdir -p "$INSTALL_DIR/data"
+
+$DOCKER_CMD run -d \
+    --name catclaw-server \
+    --restart unless-stopped \
+    -p "$HTTP_PORT:66880" \
+    -p "$DHT_PORT:66881/udp" \
+    -v "$MUSIC_DIR:/music:ro" \
+    -v "$INSTALL_DIR/data:/data" \
+    -e BOOTSTRAP_NODES="$BOOTSTRAP_NODES" \
+    -e RATE_LIMIT="$RATE_LIMIT" \
+    -e DEVICE_NAME="$DEVICE_NAME" \
+    catclaw-server:latest
+
+sleep 2
+IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost')
+
+echo ""
+log "部署完成！"
+echo ""
+info "Web UI:  http://${IP}:${HTTP_PORT}"
+info "查看日志: docker logs -f catclaw-server"
+info "重启服务: docker restart catclaw-server"
+info ""
+info "更新到最新版:"
+info "  从 Gitee: curl -fsSL https://gitee.com/kankejiang/catclaw-server/raw/master/installCatClawServer_gitee.sh | bash"
+info "  从 GitHub: curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/master/installCatClawServer.sh | bash"

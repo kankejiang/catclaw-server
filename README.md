@@ -23,10 +23,14 @@
 ### 方式一：Docker 编译安装（推荐）
 
 ```bash
+# GitHub（国际）
 curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/master/installCatClawServer.sh | bash
+
+# Gitee（国内镜像，速度快）
+curl -fsSL https://gitee.com/kankejiang/catclaw-server/raw/master/installCatClawServer_gitee.sh | bash
 ```
 
-> 自动克隆源码 → Docker 构建 → 启动容器。国内网络慢可改用方式二。
+> 自动克隆源码 → Docker 构建 → 启动容器。Gitee 镜像失败会自动回退到 GitHub。
 
 ### 方式二：预构建镜像
 
