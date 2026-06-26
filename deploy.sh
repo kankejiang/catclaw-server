@@ -60,21 +60,31 @@ for arg in "${@:-}"; do
     esac
 done
 
-# ── 交互式收集配置 ──────────────────────────────────────────
+# ── 智能探测音乐目录 ────────────────────────────────────────
+detect_music_dir() {
+    for dir in "/vol1/music" "/volume1/music" "/mnt/music" "/mnt/nas/music" "/media/music" "$HOME/music" "$HOME/Music"; do
+        if [ -d "$dir" ]; then
+            echo "$dir"
+            return
+        fi
+    done
+    # 如果都找不到，用默认路径（后续在 Web UI 中修改）
+    echo "/vol1/music"
+}
+
 if [ -z "$MUSIC_DIR" ]; then
+    DETECTED=$(detect_music_dir)
     echo ""
-    ask "请输入音乐文件存放目录（如 /vol1/music 或 /mnt/nas/music）"
+    ask "音乐文件存放目录 [$DETECTED]"
     read -r -p "  > " MUSIC_DIR
-    if [ -z "$MUSIC_DIR" ]; then
-        warn "未输入音乐目录，已取消"
-        exit 1
-    fi
+    MUSIC_DIR="${MUSIC_DIR:-$DETECTED}"
 fi
 
 if [ ! -d "$MUSIC_DIR" ]; then
     warn "目录不存在: $MUSIC_DIR"
-    info "请检查路径是否正确"
-    exit 1
+    info "服务仍会安装，稍后可在 Web UI 中修改音乐目录"
+    info "(目录将在首次扫描前自动创建)"
+    mkdir -p "$MUSIC_DIR" 2>/dev/null || true
 fi
 
 # ── 自动选择部署模式 ────────────────────────────────────────

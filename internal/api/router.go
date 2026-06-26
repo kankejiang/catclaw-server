@@ -49,6 +49,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	// Rate limiter config
 	mux.HandleFunc("/api/config/ratelimit", handleRateLimitConfig(cfg))
+	mux.HandleFunc("/api/config/musicdir", handleMusicDirConfig(cfg))
 
 	// Serve embedded web UI
 	mux.Handle("/", http.FileServer(http.FS(cfg.WebFS)))
@@ -336,6 +337,31 @@ func handleRateLimitConfig(cfg RouterConfig) http.HandlerFunc {
 			}
 			cfg.Limiter.SetRate(body.RateLimit)
 			writeJSON(w, map[string]int{"rate_limit": cfg.Limiter.Rate()})
+		default:
+			http.Error(w, "method not allowed", 405)
+		}
+	}
+}
+
+func handleMusicDirConfig(cfg RouterConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, map[string]string{"music_dir": cfg.Scanner.MusicDir()})
+		case http.MethodPut:
+			var body struct {
+				MusicDir string `json:"music_dir"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "invalid body", 400)
+				return
+			}
+			if body.MusicDir == "" {
+				http.Error(w, "music_dir is required", 400)
+				return
+			}
+			cfg.Scanner.SetMusicDir(body.MusicDir)
+			writeJSON(w, map[string]string{"music_dir": body.MusicDir})
 		default:
 			http.Error(w, "method not allowed", 405)
 		}
