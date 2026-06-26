@@ -20,23 +20,25 @@
 
 ## 📦 一键部署
 
-复制下面一条命令到终端即可：
+### 方式一：Docker 编译安装（推荐）
 
 ```bash
-wget https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh && bash deploy.sh
+curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/master/install.sh | bash
 ```
 
-> 脚本会交互式询问你的音乐目录，输入路径后自动安装。
->
-> 跳过交互，一行搞定：
-> ```bash
-> MUSIC_DIR=/vol1/music bash -c "$(wget -qO- https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh)" deploy.sh
-> ```
->
-> **本地编译部署**（飞牛OS 推荐，无需预构建镜像）：
-> ```bash
-> wget https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh && bash deploy.sh build
-> ```
+> 自动克隆源码 → Docker 构建 → 启动容器。国内网络慢可改用方式二。
+
+### 方式二：预构建镜像
+
+```bash
+wget https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh && bash deploy.sh docker
+```
+
+### 方式三：指定音乐目录，跳过交互
+
+```bash
+MUSIC_DIR=/vol1/music bash -c "$(curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/master/install.sh)"
+```
 
 ---
 
