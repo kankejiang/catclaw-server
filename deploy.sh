@@ -3,7 +3,7 @@
 #  CatClaw Server — 一键部署脚本
 #  用法:  bash deploy.sh              (交互模式，推荐)
 #        MUSIC_DIR=/music bash deploy.sh
-#        bash deploy.sh docker|binary|systemd
+#        bash deploy.sh docker|binary|systemd|build
 #  License: MIT
 # ============================================================
 
@@ -36,13 +36,14 @@ DEPLOY_MODE="${DEPLOY_MODE:-auto}"   # auto | docker | binary | systemd
 # ── 解析命令行参数 ──────────────────────────────────────────
 for arg in "${@:-}"; do
     case "$arg" in
-        docker|binary|systemd) DEPLOY_MODE="$arg" ;;
+        docker|binary|systemd|build) DEPLOY_MODE="$arg" ;;
         help|-h|--help)
-            echo "用法:  bash deploy.sh [docker|binary|systemd]"
+            echo "用法:  bash deploy.sh [docker|binary|systemd|build]"
             echo ""
-            echo "  docker    - Docker 容器部署"
-            echo "  binary    - 下载二进制直接运行（前台）"
-            echo "  systemd   - 二进制 + systemd 服务（后台自启，推荐）"
+            echo "  docker    - Docker 容器部署（拉取预构建镜像）"
+            echo "  build     - git clone + docker build 本地编译部署"
+            echo "  binary    - 下载预编译二进制直接运行（前台）"
+            echo "  systemd   - 二进制 + systemd 服务（后台自启）"
             echo ""
             echo "环境变量:"
             echo "  MUSIC_DIR       音乐目录 (必填)"
@@ -94,11 +95,11 @@ if [ "$DEPLOY_MODE" = "auto" ]; then
         info "检测到 Docker，使用 Docker 模式"
     elif [ "$(id -u)" = "0" ] && [ -d /etc/systemd ]; then
         info "未检测到 Docker，尝试 systemd 模式"
-        info "（需要预编译二进制，如失败请安装 Docker 后重试）"
+        info "（需要预编译二进制，如失败请安装 Docker 后重试: bash deploy.sh build）"
         DEPLOY_MODE="systemd"
     else
         info "未检测到 Docker，尝试二进制模式"
-        info "（需要预编译二进制，如失败请安装 Docker 后重试）"
+        info "（需要预编译二进制，如失败请安装 Docker 后重试: bash deploy.sh build）"
         DEPLOY_MODE="binary"
     fi
 fi
@@ -115,7 +116,7 @@ info "  设备名称:   $DEVICE_NAME"
 info "  限速:       ${RATE_LIMIT} KB/s"
 echo ""
 
-# ── Docker 模式 ─────────────────────────────────────────────
+# ── Docker 模式（拉取预构建镜像）─────────────────────────────
 deploy_docker() {
     if ! command -v docker &>/dev/null; then
         warn "未找到 Docker，请先安装"
@@ -127,6 +128,16 @@ deploy_docker() {
     mkdir -p "$DATA_DIR"
 
     docker rm -f catclaw-server 2>/dev/null || true
+
+    # Try pulling prebuilt image first
+    info "拉取预构建镜像..."
+    if docker pull ghcr.io/kankejiang/catclaw-server:"$VERSION" 2>/dev/null; then
+        log "镜像拉取成功"
+    else
+        warn "预构建镜像拉取失败，自动切换为本地编译构建..."
+        deploy_build
+        return
+    fi
 
     docker run -d \
         --name catclaw-server \
@@ -145,7 +156,51 @@ deploy_docker() {
     log "部署完成！"
     info "Web UI:  http://${IP}:${HTTP_PORT}"
     info "管理:    docker logs -f catclaw-server"
-    info "停止:    docker stop catclaw-server"
+}
+
+# ── 本地构建模式（git clone + docker build）─────────────────
+deploy_build() {
+    if ! command -v docker &>/dev/null; then
+        warn "未找到 Docker"
+        exit 1
+    fi
+    if ! command -v git &>/dev/null; then
+        warn "需要 git，请先安装: apt install git / yum install git"
+        exit 1
+    fi
+
+    BUILD_DIR="$DATA_DIR/build"
+    mkdir -p "$DATA_DIR"
+
+    info "克隆项目代码..."
+    rm -rf "$BUILD_DIR"
+    git clone --depth 1 https://github.com/kankejiang/catclaw-server.git "$BUILD_DIR"
+
+    info "Docker 编译构建 (约 2-3 分钟)..."
+    docker build -t catclaw-server:local "$BUILD_DIR"
+
+    rm -rf "$BUILD_DIR"
+    log "编译完成"
+
+    docker rm -f catclaw-server 2>/dev/null || true
+
+    docker run -d \
+        --name catclaw-server \
+        --restart unless-stopped \
+        -p "$HTTP_PORT:66880" \
+        -p "$DHT_PORT:66881/udp" \
+        -v "$MUSIC_DIR:/music:ro" \
+        -v "$DATA_DIR:/data" \
+        -e DEVICE_NAME="$DEVICE_NAME" \
+        -e RATE_LIMIT="$RATE_LIMIT" \
+        -e BOOTSTRAP_NODES="$BOOTSTRAP_NODES" \
+        catclaw-server:local
+
+    sleep 2
+    IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost')
+    log "部署完成！"
+    info "Web UI:  http://${IP}:${HTTP_PORT}"
+    info "管理:    docker logs -f catclaw-server"
 }
 
 # ── 二进制模式 ──────────────────────────────────────────────
@@ -291,6 +346,7 @@ EOF
 # ── 执行 ────────────────────────────────────────────────────
 case "$DEPLOY_MODE" in
     docker)   deploy_docker ;;
+    build)    deploy_build ;;
     binary)   deploy_binary ;;
     systemd)  deploy_systemd ;;
 esac
