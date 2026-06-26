@@ -24,7 +24,7 @@ BANNER
 
 # ── 配置 ────────────────────────────────────────────────────
 MUSIC_DIR="${MUSIC_DIR:-}"
-DATA_DIR="${DATA_DIR:-$HOME/.catclaw}"
+DATA_DIR="${DATA_DIR:-$([ "$(id -u)" = "0" ] && echo /opt/catclaw || echo $HOME/.catclaw)}"
 HTTP_PORT="${HTTP_PORT:-66880}"
 DHT_PORT="${DHT_PORT:-66881}"
 DEVICE_NAME="${DEVICE_NAME:-$(hostname 2>/dev/null || echo 'CatClaw')}"
