@@ -32,6 +32,11 @@ wget https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.s
 > ```bash
 > MUSIC_DIR=/vol1/music bash -c "$(wget -qO- https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh)" deploy.sh
 > ```
+>
+> **本地编译部署**（飞牛OS 推荐，无需预构建镜像）：
+> ```bash
+> wget https://raw.githubusercontent.com/kankejiang/catclaw-server/master/deploy.sh && bash deploy.sh build
+> ```
 
 ---
 
