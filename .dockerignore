@@ -1,0 +1,10 @@
+bin/
+obj/
+.git/
+.gitignore
+.vs/
+.github/
+.workbuddy/
+*.user
+*.suo
+.vscode/

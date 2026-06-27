@@ -1,26 +1,23 @@
-version: "3.8"
-
 services:
   catclaw-server:
-    image: ghcr.io/kankejiang/catclaw-server:latest
+    build: .
     container_name: catclaw-server
     restart: unless-stopped
     ports:
-      - "66880:66880"       # HTTP API + Web UI
-      - "66881:66881/udp"   # DHT P2P
-    volumes:
-      - /path/to/music:/music:ro   # Music directory (read-only)
-      - /path/to/data:/data        # Persistent database
+      - "37823:37823"
     environment:
-      - BOOTSTRAP_NODES=music.08102516.xyz:6881
-      - RATE_LIMIT=128             # KB/s, 0 = unlimited
-      - DEVICE_NAME=MyNAS          # Display name
-    # Optional: override default flags
-    # command:
-    #   - "--music-dir=/music"
-    #   - "--db-path=/data/catclaw.db"
-    #   - "--http-port=66880"
-    #   - "--dht-port=66881"
-    #   - "--bootstrap=music.08102516.xyz:6881"
-    #   - "--rate-limit=128"
-    #   - "--device-name=MyNAS"
+      # 音乐目录（挂载到容器 /music）
+      - MusicServer__MusicDirectory=/music
+      # 数据库与封面输出（持久化到卷 /data）
+      - MusicServer__DbPath=/data/catclaw.db
+      - MusicServer__CoverOutputDir=/data/covers
+      # 内网访问令牌：请改成强随机值（手机端连接时作为 password 填写）
+      - MusicServer__AccessToken=CHANGE_ME_STRONG_TOKEN
+      - ASPNETCORE_URLS=http://0.0.0.0:37823
+    volumes:
+      # 把左侧改成你 NAS 上的音乐目录
+      - /path/to/your/music:/music
+      - catclaw-data:/data
+
+volumes:
+  catclaw-data:
