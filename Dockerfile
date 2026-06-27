@@ -1,40 +1,23 @@
-FROM golang:1.23-alpine AS builder
-
-WORKDIR /build
-
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev sqlite-dev
-
-# Copy go module files first for caching
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copy source code
+# 多阶段构建：.NET 8 SDK 编译 → ASP.NET Core 8 运行时
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+COPY CatClawMusicServer.csproj ./
+RUN dotnet restore CatClawMusicServer.csproj
 COPY . .
+RUN dotnet publish CatClawMusicServer.csproj -c Release -o /app/publish
 
-# Build static binary
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /catclaw-server .
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+COPY --from=build /app/publish .
 
-# Runtime stage
-FROM alpine:3.21
-
-RUN apk add --no-cache ca-certificates sqlite-libs tzdata
-
-COPY --from=builder /catclaw-server /catclaw-server
-
-# Create volume directories
-RUN mkdir -p /music /data
-
-EXPOSE 66880
-EXPOSE 66881/udp
-
-ENV MUSIC_DIR=/music
-ENV DB_PATH=/data/catclaw.db
-ENV BOOTSTRAP_NODES=music.08102516.xyz:6881
-ENV RATE_LIMIT=128
-ENV DEVICE_NAME=""
+# NAS 部署默认路径（可用 docker-compose 环境变量覆盖）
+ENV MusicServer__MusicDirectory=/music
+ENV MusicServer__DbPath=/data/catclaw.db
+ENV MusicServer__CoverOutputDir=/data/covers
+ENV MusicServer__AccessToken=
+ENV ASPNETCORE_URLS=http://0.0.0.0:37823
 
 VOLUME ["/music", "/data"]
+EXPOSE 37823
 
-ENTRYPOINT ["/catclaw-server"]
-CMD ["--music-dir", "/music", "--db-path", "/data/catclaw.db"]
+ENTRYPOINT ["dotnet", "CatClawMusicServer.dll"]
