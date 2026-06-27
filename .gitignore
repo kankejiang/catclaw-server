@@ -1,18 +1,26 @@
-# Build output
-/catclaw-server
+# Visual Studio
+.vs/
+bin/
+obj/
+*.user
+*.suo
+
+# .NET
+*.dll
 *.exe
+*.pdb
+*.cache
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Database
+# SQLite
 *.db
-*.db-journal
+*.db-shm
 *.db-wal
 
-# OS
-.DS_Store
-Thumbs.db
+# 封面输出
+Data/covers/
+
+# 日志
+*.log
+
+# WorkBuddy
+.workbuddy/
