@@ -10,18 +10,18 @@ namespace CatClawMusicServer.Controllers;
 [Route("api/[controller]")]
 public class ScanController : ControllerBase
 {
-    private readonly MusicScanner _scanner;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ScannerOptions _options;
     private readonly ILogger<ScanController> _logger;
 
     private static ScanStatus _status = new();
 
     public ScanController(
-        MusicScanner scanner,
+        IServiceScopeFactory scopeFactory,
         ScannerOptions options,
         ILogger<ScanController> logger)
     {
-        _scanner = scanner;
+        _scopeFactory = scopeFactory;
         _options = options;
         _logger = logger;
     }
@@ -47,7 +47,10 @@ public class ScanController : ControllerBase
         {
             try
             {
-                var result = await _scanner.ScanDirectoryAsync(
+                using var scope = _scopeFactory.CreateScope();
+                var scanner = scope.ServiceProvider.GetRequiredService<MusicScanner>();
+
+                var result = await scanner.ScanDirectoryAsync(
                     _options.MusicDirectory,
                     _options.CoverOutputDir,
                     CancellationToken.None);
