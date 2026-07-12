@@ -30,14 +30,19 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  配置（直接回车使用默认值）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-read -p "音乐目录 [留空跳过，部署后再设]: " music_dir
+read -p "音乐目录 [留空跳过，部署后再设]: " music_dir < /dev/tty
 MUSIC_DIR="${music_dir:-/mnt/media/music}"
-read -p "监听端口 [37823]: " port
+read -p "监听端口 [37823]: " port < /dev/tty
 PORT="${port:-37823}"
-read -p "访问令牌（留空自动生成）: " token
+read -p "访问令牌（留空自动生成）: " token < /dev/tty
 ACCESS_TOKEN="${token:-$(openssl rand -hex 16)}"
 
 mkdir -p "$MUSIC_DIR" 2>/dev/null || echo "⚠️ $MUSIC_DIR 暂不可写，部署后可手动创建并放入音乐文件"
+
+# 最终兜底：确保关键变量不为空（防止 pipe 模式下 read 未读到输入）
+if [ -z "$MUSIC_DIR" ]; then
+    MUSIC_DIR="/mnt/media/music"
+fi
 
 echo "📁 安装目录: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data/covers"
