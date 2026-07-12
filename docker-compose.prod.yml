@@ -1,27 +1,30 @@
-# NAS 生产部署文件：拉取预构建镜像
-# GitHub 项目：https://github.com/kankejiang/catclaw-server
-# Gitee 镜像：https://gitee.com/kankejiang/catclaw-server
-#
+# NAS 生产部署：拉取预构建镜像
 # 使用方法：
 #   1. 把 /mnt/media/music 改成你的音乐目录
-#   2. 设置强随机 AccessToken
-#   3. docker compose -f docker-compose.prod.yml up -d
-#   4. 浏览器打开 http://NAS内网IP:37823 注册管理员
+#   2. docker compose -f docker-compose.prod.yml up -d
+#   3. 浏览器打开 http://NAS-IP:37823 注册管理员
 
 services:
   catclaw-server:
     image: ghcr.io/kankejiang/catclaw-server:latest
     container_name: catclaw-server
     restart: unless-stopped
-    network_mode: host  # 使用 host 网络模式以便 UDP 打洞和 IPv6
+    network_mode: host  # host 网络：UDP 打洞 + IPv6 + DHT 自动可用
     environment:
       MusicServer__MusicDirectory: /music
       MusicServer__DbPath: /data/catclaw.db
       MusicServer__CoverOutputDir: /data/covers
-      MusicServer__AccessToken: 请改成你自己的强随机令牌
+      MusicServer__AccessToken: ""
       MusicServer__AdminUser: admin
       MusicServer__AdminPassword: ""
       ASPNETCORE_URLS: "http://0.0.0.0:37823"
+      # ── 流媒体 ──
+      Streaming__HlsEnabled: "true"
+      Streaming__FFmpegPath: /usr/bin/ffmpeg
+      Streaming__TranscodeDir: /data/transcode
+      # ── P2P（DHT 默认启用，种子节点 nas.08102516.xyz:37825）──
+      ClawCircle__DhtEnabled: "true"
+      ClawCircle__DhtPort: "37825"
     volumes:
       - /mnt/media/music:/music          # ← 改成你的音乐目录
-      - ./catclaw-data:/data              # 数据持久化到当前目录
+      - ./catclaw-data:/data
