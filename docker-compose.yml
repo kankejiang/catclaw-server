@@ -9,7 +9,12 @@ services:
     build: .
     container_name: catclaw-server
     restart: unless-stopped
-    network_mode: host  # host 网络：IPv6 + UDP 打洞 + DHT 自动可用
+    networks:
+      - catclaw-net
+    ports:
+      - "37823:37823"       # HTTP / WebSocket / Web UI
+      - "37824:37824/udp"   # STUN（NAT 打洞）
+      - "37825:37825/udp"   # DHT（节点发现）
     environment:
       MusicServer__MusicDirectory: /music
       MusicServer__DbPath: /data/catclaw.db
@@ -26,5 +31,14 @@ services:
       ClawCircle__DhtEnabled: "true"
       ClawCircle__DhtPort: "37825"
     volumes:
-      - /mnt/media/music:/music          # ← 改成你的音乐目录
+      - /mnt/media/music:/music
       - ./catclaw-data:/data
+
+networks:
+  catclaw-net:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+        - subnet: fd00:catclaw::/64
