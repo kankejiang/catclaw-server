@@ -30,7 +30,7 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  配置（直接回车使用默认值）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-read -p "音乐目录 [留空跳过，部署后再设]: " music_dir < /dev/tty
+read -p "音乐目录（放MP3/FLAC的文件夹路径）[/mnt/media/music]: " music_dir < /dev/tty
 MUSIC_DIR="${music_dir:-/mnt/media/music}"
 read -p "监听端口 [37823]: " port < /dev/tty
 PORT="${port:-37823}"
