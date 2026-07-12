@@ -49,7 +49,7 @@ builder.Services.AddSingleton(new ServerAuthOptions { AccessToken = accessToken,
 
 // 管理员凭据持久化存储（首次启动从 appsettings 读，注册后写入 Data/admin.json）
 builder.Services.AddSingleton<AdminCredentialStore>(sp =>
-    new AdminCredentialStore(sp.GetRequiredService<ServerAuthOptions>()));
+    new AdminCredentialStore(sp.GetRequiredService<ServerAuthOptions>(), dbPath));
 
 // 猫爪圈 P2P tracker 在线节点注册表（单例）
 builder.Services.AddSingleton<ClawCircleTracker>();

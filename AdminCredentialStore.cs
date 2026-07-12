@@ -21,9 +21,10 @@ public class AdminCredentialStore
     public string AccessToken => _defaultAccessToken;
     public bool IsConfigured => _configured;
 
-    public AdminCredentialStore(ServerAuthOptions options)
+    public AdminCredentialStore(ServerAuthOptions options, string dbPath)
     {
-        _filePath = Path.Combine(AppContext.BaseDirectory, "Data", "admin.json");
+        var dataDir = Path.GetDirectoryName(Path.GetFullPath(dbPath))!;
+        _filePath = Path.Combine(dataDir, "admin.json");
         _defaultAccessToken = options.AccessToken;
 
         // 优先读已持久化的凭据
