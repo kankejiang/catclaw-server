@@ -1,0 +1,25 @@
+# NAS 生产部署文件：拉取预构建镜像（ghcr.io/你的用户名/catclawmusicserver:latest）
+# 使用方法：
+#   1. 把下面 image 改成你的镜像地址
+#   2. 把 /mnt/media/music 改成你的音乐目录
+#   3. 设置强随机 AccessToken
+#   4. docker compose -f docker-compose.prod.yml up -d
+#   5. 浏览器打开 http://NAS内网IP:37823 注册管理员
+
+services:
+  catclaw-server:
+    image: ghcr.io/你的用户名/catclawmusicserver:latest
+    container_name: catclaw-server
+    restart: unless-stopped
+    network_mode: host  # 使用 host 网络模式以便 UDP 打洞和 IPv6
+    environment:
+      - MusicServer__MusicDirectory=/music
+      - MusicServer__DbPath=/data/catclaw.db
+      - MusicServer__CoverOutputDir=/data/covers
+      - MusicServer__AccessToken=请改成你自己的强随机令牌
+      - MusicServer__AdminUser=admin
+      - MusicServer__AdminPassword=
+      - ASPNETCORE_URLS=http://0.0.0.0:37823
+    volumes:
+      - /mnt/media/music:/music          # ← 改成你的音乐目录
+      - ./catclaw-data:/data              # 数据持久化到当前目录

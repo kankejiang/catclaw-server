@@ -15,9 +15,15 @@ ENV MusicServer__MusicDirectory=/music
 ENV MusicServer__DbPath=/data/catclaw.db
 ENV MusicServer__CoverOutputDir=/data/covers
 ENV MusicServer__AccessToken=
+ENV MusicServer__AdminUser=admin
+ENV MusicServer__AdminPassword=
 ENV ASPNETCORE_URLS=http://0.0.0.0:37823
 
+# 音量卷：音乐库 + 数据（DB/封面/管理员凭据）持久化
 VOLUME ["/music", "/data"]
+
+# HTTP + STUN（UDP 打洞）
 EXPOSE 37823
+EXPOSE 37824/udp
 
 ENTRYPOINT ["dotnet", "CatClawMusicServer.dll"]

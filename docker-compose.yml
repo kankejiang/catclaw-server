@@ -4,15 +4,19 @@ services:
     container_name: catclaw-server
     restart: unless-stopped
     ports:
-      - "37823:37823"
+      - "37823:37823"       # HTTP / WebSocket / Web UI
+      - "37824:37824/udp"   # STUN（猫爪圈 NAT 打洞）
     environment:
       # 音乐目录（挂载到容器 /music）
       - MusicServer__MusicDirectory=/music
       # 数据库与封面输出（持久化到卷 /data）
       - MusicServer__DbPath=/data/catclaw.db
       - MusicServer__CoverOutputDir=/data/covers
-      # 内网访问令牌：请改成强随机值（手机端连接时作为 password 填写）
-      - MusicServer__AccessToken=CHANGE_ME_STRONG_TOKEN
+      # 内网访问令牌（手机端 Navidrome 连接时填此值作为 "password"）
+      - MusicServer__AccessToken=请改成你自己的强随机令牌
+      # 管理员凭据（首次启动为空密码=进入注册页创建，注册后写 /data/admin.json）
+      - MusicServer__AdminUser=admin
+      - MusicServer__AdminPassword=
       - ASPNETCORE_URLS=http://0.0.0.0:37823
     volumes:
       # 把左侧改成你 NAS 上的音乐目录

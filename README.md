@@ -90,6 +90,7 @@ dotnet publish CatClawMusicServer.csproj -c Release -r win-x64 --self-contained 
 | `--token <字符串>` | 内网访问令牌（Subsonic 密码 / Bearer） | `MusicServer:AccessToken`（空=关闭鉴权） |
 | `--port <端口>` | Kestrel 监听端口 | `37823` |
 | `--scan-and-exit` | 仅扫描音乐库后退出（不启动 Web 服务） | 否 |
+| `claw reset` | 删除管理员凭据，下次启动将进入首次注册流程 | — |
 
 ### 运行示例
 ```bash
@@ -98,18 +99,68 @@ CatClawMusicServer.exe --music-dir "D:\Music" --token "强随机令牌" --port 3
 
 # 仅建库模式（一次性扫描，可用于定时任务 / 无界面索引）
 CatClawMusicServer.exe --music-dir "D:\Music" --scan-and-exit
+
+# 重置管理员（忘记密码后，下次启动重新注册）
+CatClawMusicServer.exe claw reset
 ```
 
 ### 客户端连接（手机端 CatClawMusic）
 「远程音乐」→ 协议选 **Navidrome**，地址填 `http://<NAS内网IP>:37823`，
 用户名任意，密码填上面 `--token` 的值即可直连听歌 / 同步。
 
+## GitHub Actions 自动构建 Docker 镜像
+
+每次推送到 `main` 分支会自动构建并推送到 **GitHub Container Registry** (`ghcr.io`)。
+
+首次使用需要：
+1. 在 GitHub 仓库 Settings → Actions → General → Workflow permissions 中勾选 "Read and write permissions"
+2. 推送代码后，在 Actions 标签页查看构建状态
+3. 构建成功后，在 Packages 页面将镜像设为 Public（Settings → Packages → 选中镜像 → Change visibility → Public）
+
 ## NAS / Docker 部署
-仓库已附带 `Dockerfile` 与 `docker-compose.yml`（端口 `37823`）。在 NAS 上：
+
+### 方式一：docker compose 构建（本地编译）
+
 ```bash
+# 1. 克隆仓库
+git clone https://github.com/你的用户名/CatClawMusicServer.git
+cd CatClawMusicServer
+
+# 2. 编辑 docker-compose.yml，修改：
+#    - AccessToken（强随机令牌）
+#    - volumes 中的音乐目录路径
+#    - AdminPassword 留空（首次启动进入注册页）
+
+# 3. 启动
 docker compose up -d
-# 然后改 docker-compose.yml 里的 MusicServer__AccessToken 为强令牌
+
+# 4. 浏览器打开 http://NAS内网IP:37823 → 注册管理员 → 开始使用
+
+# 5. 后续升级
+git pull && docker compose up -d --build
 ```
+
+### 方式二：拉取预构建镜像（推荐）
+
+```bash
+# 1. 复制 docker-compose.prod.yml 到 NAS 上，重命名为 docker-compose.yml
+# 2. 修改 image 为你的 ghcr.io 镜像地址
+# 3. 修改 AccessToken 和音乐目录路径
+# 4. 启动
+docker compose up -d
+```
+
+### 忘记密码
+
+在 NAS 上执行以下命令重置管理员：
+
+```bash
+docker exec -it catclaw-server dotnet CatClawMusicServer.dll claw reset
+# 或者删除数据卷中的凭据文件：
+docker exec -it catclaw-server rm -f /data/admin.json
+docker compose restart
+```
+
 未安装 Docker 的 Windows 机器可直接使用上面的自包含 EXE。
 
 ## 猫爪圈（ClawCircle）P2P 信令（Stage 2）

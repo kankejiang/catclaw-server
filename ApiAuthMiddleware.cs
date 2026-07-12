@@ -21,6 +21,13 @@ public class ApiAuthMiddleware
     {
         var path = context.Request.Path.Value ?? "";
 
+        // /api/auth/* 为公共端点（注册/登录/登出/状态），不校验 AccessToken
+        if (path.StartsWith("/api/auth", StringComparison.OrdinalIgnoreCase))
+        {
+            await _next(context);
+            return;
+        }
+
         var isRest = path.StartsWith("/rest/", StringComparison.OrdinalIgnoreCase);
         var isApi = path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase);
 
@@ -45,6 +52,13 @@ public class ApiAuthMiddleware
                 var authHeader = context.Request.Headers["Authorization"].ToString();
                 if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                     ok = authHeader["Bearer ".Length..].Trim() == auth.AccessToken;
+
+                // Web UI 登录后 cookie 也视为鉴权通过
+                if (!ok)
+                {
+                    var sessionCookie = context.Request.Cookies["catclaw_session"];
+                    ok = !string.IsNullOrEmpty(sessionCookie) && sessionCookie == auth.AccessToken;
+                }
             }
 
             if (!ok)
