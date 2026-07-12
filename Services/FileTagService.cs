@@ -14,12 +14,6 @@ public record AudioTags(
     string Genre,
     string? CoverPath); // 提取的封面保存路径
 
-public class ScannerOptions
-{
-    public string MusicDirectory { get; set; } = "";
-    public string CoverOutputDir { get; set; } = "";
-}
-
 public static class FileTagService
 {
     /// <summary>

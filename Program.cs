@@ -17,6 +17,8 @@ var musicDir = cli.TryGetValue("music-dir", out var md) && !string.IsNullOrWhite
 var coverDir = config["MusicServer:CoverOutputDir"] ?? "Data/covers";
 int? cliPort = cli.TryGetValue("port", out var ps) && int.TryParse(ps, out var pp) ? pp : null;
 var accessToken = cli.TryGetValue("token", out var tk) ? tk : (config["MusicServer:AccessToken"] ?? "");
+var adminUser = config["MusicServer:AdminUser"] ?? "admin";
+var adminPassword = config["MusicServer:AdminPassword"] ?? "";
 
 // 确保目录存在
 Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
@@ -43,7 +45,11 @@ builder.Services.AddSingleton(new ScannerOptions
 });
 
 // 内网鉴权配置（AccessToken 为空则关闭鉴权，便于本地开发）
-builder.Services.AddSingleton(new ServerAuthOptions { AccessToken = accessToken });
+builder.Services.AddSingleton(new ServerAuthOptions { AccessToken = accessToken, AdminUser = adminUser, AdminPassword = adminPassword });
+
+// 管理员凭据持久化存储（首次启动从 appsettings 读，注册后写入 Data/admin.json）
+builder.Services.AddSingleton<AdminCredentialStore>(sp =>
+    new AdminCredentialStore(sp.GetRequiredService<ServerAuthOptions>()));
 
 // 猫爪圈 P2P tracker 在线节点注册表（单例）
 builder.Services.AddSingleton<ClawCircleTracker>();
@@ -87,6 +93,22 @@ builder.Services.AddRateLimiter(opt =>
 
 var app = builder.Build();
 
+// ── 命令行模式：重置管理员凭据（claw reset）──
+if (cli.TryGetValue("claw-reset", out _))
+{
+    var adminFile = Path.Combine(AppContext.BaseDirectory, "Data", "admin.json");
+    if (File.Exists(adminFile))
+    {
+        File.Delete(adminFile);
+        Console.WriteLine("[claw] 管理员凭据已重置。重启服务端后将进入首次注册流程。");
+    }
+    else
+    {
+        Console.WriteLine("[claw] 未找到管理员凭据文件（尚未注册或已重置）。");
+    }
+    return;
+}
+
 // ── 命令行模式：仅扫描后退出（--scan-and-exit）──
 if (cli.TryGetValue("scan-and-exit", out _))
 {
@@ -117,6 +139,7 @@ app.UseCors();
 app.UseWebSockets();  // 启用 WebSocket 升级处理（ClawCircle 信令依赖）
 app.UseMiddleware<ClawCircleWebSocketMiddleware>(); // 猫爪圈 WebSocket 信令（拦截 /ws/clawcircle，自带 token 鉴权）
 app.UseMiddleware<ApiAuthMiddleware>();   // 内网鉴权（/api 与 /rest）
+app.UseMiddleware<WebUiAuthMiddleware>(); // Web UI 静态页面鉴权（cookie 登录，未登录跳 login.html）
 app.UseDefaultFiles();   // 支持 index.html 默认文件
 app.UseStaticFiles();   // 服务 wwwroot 静态文件
 
@@ -149,6 +172,8 @@ static Dictionary<string, string> ParseCliArgs(string[] args)
     for (int i = 0; i < args.Length; i++)
     {
         var a = args[i];
+        // 无前缀的子命令
+        if (a == "claw" && i + 1 < args.Length && args[i + 1] == "reset") { d["claw-reset"] = "true"; i++; continue; }
         if (a.Length > 2 && a.StartsWith("--"))
         {
             var key = a.Substring(2);
@@ -161,9 +186,4 @@ static Dictionary<string, string> ParseCliArgs(string[] args)
     return d;
 }
 
-// ── 配置选项记录 ──
-public record ScannerOptions
-{
-    public string MusicDirectory { get; set; } = "";
-    public string CoverOutputDir { get; set; } = "";
-}
+// ── 配置选项记录（定义在 ScannerOptions.cs 中，Program.cs 不再重复定义）──

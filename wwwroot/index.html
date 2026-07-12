@@ -106,6 +106,8 @@ input[type=text].setting-input:focus { outline:none; border-color:#00d4ff; }
   <div class="nav-item" onclick="switchTab('albums',this)">💿 专辑</div>
   <div class="nav-item" onclick="switchTab('playlists',this)">📋 播放列表</div>
   <div class="nav-item" onclick="switchTab('settings',this)">⚙️ 设置</div>
+  <div style="border-top:1px solid #333; margin:8px 0;"></div>
+  <div class="nav-item" onclick="doLogout()" style="color:#f66;">🚪 退出登录</div>
 </div>
 
 <div class="main">
@@ -154,6 +156,16 @@ input[type=text].setting-input:focus { outline:none; border-color:#00d4ff; }
 
 <script>
 const API = '/api';
+
+// 全局 fetch 包装：401 → 跳转登录
+const _origFetch = window.fetch;
+window.fetch = function(...args) {
+  return _origFetch(...args).then(r => {
+    if (r.status === 401) { location.href = '/login.html'; throw new Error('请登录'); }
+    return r;
+  });
+};
+
 let currentTab = 'songs';
 let currentPage = 1;
 let pageSize = 50;
@@ -616,6 +628,12 @@ async function clearFavorites() {
   }
   alert(ok ? '已清除' : '部分清除失败');
   loadSettings(document.getElementById('content'));
+}
+
+// ── 退出 ──
+async function doLogout() {
+  await fetch('/api/auth/logout', { method:'POST' });
+  location.href = '/login.html';
 }
 
 // ── 初始化 ──
