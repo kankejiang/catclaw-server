@@ -108,6 +108,30 @@ CatClawMusicServer.exe claw reset
 「远程音乐」→ 协议选 **Navidrome**，地址填 `http://<NAS内网IP>:37823`，
 用户名任意，密码填上面 `--token` 的值即可直连听歌 / 同步。
 
+## 快速开始
+
+### 🚀 一键部署（推荐）
+
+```bash
+# 国内 Gitee 镜像（推荐）
+curl -fsSL https://gitee.com/kankejiang/catclaw-server/raw/main/install_gitee.sh | sudo bash
+
+# GitHub（海外用户）
+curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/main/install.sh | sudo bash
+```
+
+脚本会自动安装 Docker、克隆源码、构建镜像、交互式配置端口/令牌/音乐目录，完成后输出访问地址和管理员令牌。
+
+### 🔑 首次使用
+
+浏览器打开 `http://NAS_IP:37823` → 自动进入注册页 → 创建管理员 → 登录。
+
+忘记密码时在 NAS 上执行：
+```bash
+docker exec -it catclaw-server dotnet CatClawMusicServer.dll claw reset
+docker compose -f /opt/catclaw-server/docker-compose.yml restart
+```
+
 ## GitHub Actions 自动构建 Docker 镜像
 
 每次推送到 `main` 分支会自动构建并推送到 **GitHub Container Registry** (`ghcr.io/kankejiang/catclaw-server`)。
@@ -122,49 +146,23 @@ CatClawMusicServer.exe claw reset
 - **GitHub**（主仓库）：https://github.com/kankejiang/catclaw-server
 - **Gitee**（国内镜像）：https://gitee.com/kankejiang/catclaw-server
 
-## NAS / Docker 部署
+## NAS / Docker 手动部署
 
-### 方式一：docker compose 构建（本地编译）
+### 方式一：docker compose 本地构建评估
 
 ```bash
-# 1. 克隆仓库（国内用 Gitee 更快）
-git clone https://github.com/kankejiang/catclaw-server.git
-# 或
 git clone https://gitee.com/kankejiang/catclaw-server.git
 cd catclaw-server
-
-# 2. 编辑 docker-compose.yml，修改：
-#    - AccessToken（强随机令牌）
-#    - volumes 中的音乐目录路径
-#    - AdminPassword 留空（首次启动进入注册页）
-
-# 3. 启动
-docker compose up -d
-
-# 4. 浏览器打开 http://NAS内网IP:37823 → 注册管理员 → 开始使用
-
-# 5. 后续升级
-git pull && docker compose up -d --build
-```
-
-### 方式二：拉取预构建镜像（推荐，无需编译）
-
-```bash
-# 1. 复制 docker-compose.prod.yml 到 NAS 上，重命名为 docker-compose.yml
-# 2. 修改 AccessToken 和音乐目录路径（image 已指向 ghcr.io/kankejiang/catclaw-server）
-# 3. 启动
+# 编辑 docker-compose.yml 中的 AccessToken 和音乐目录路径
 docker compose up -d
 ```
 
-### 忘记密码
-
-在 NAS 上执行以下命令重置管理员：
+### 方式二：拉取预构建镜像
 
 ```bash
-docker exec -it catclaw-server dotnet CatClawMusicServer.dll claw reset
-# 或者删除数据卷中的凭据文件：
-docker exec -it catclaw-server rm -f /data/admin.json
-docker compose restart
+# 复制 docker-compose.prod.yml，改名 docker-compose.yml
+# 编辑 AccessToken 和音乐目录，直接启动
+docker compose up -d
 ```
 
 未安装 Docker 的 Windows 机器可直接使用上面的自包含 EXE。
