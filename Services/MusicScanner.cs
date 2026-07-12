@@ -6,7 +6,7 @@ namespace CatClawMusicServer.Services;
 
 public class MusicScanner
 {
-    private readonly ApplicationDbContext _db;
+    private readonly IDbContextFactory<ApplicationDbContext> _dbFactory;
     private readonly ILogger<MusicScanner> _logger;
     private static readonly string[] SupportedExtensions =
     {
@@ -15,9 +15,9 @@ public class MusicScanner
         ".mp2", ".mpc", ".tta", ".opus"
     };
 
-    public MusicScanner(ApplicationDbContext db, ILogger<MusicScanner> logger)
+    public MusicScanner(IDbContextFactory<ApplicationDbContext> dbFactory, ILogger<MusicScanner> logger)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _logger = logger;
     }
 
@@ -33,6 +33,8 @@ public class MusicScanner
             return result;
         }
 
+        using var db = _dbFactory.CreateDbContext();
+
         _logger.LogInformation("开始扫描目录: {Dir}", directory);
         var files = Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories)
             .Where(f => SupportedExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()));
@@ -43,7 +45,7 @@ public class MusicScanner
 
             try
             {
-                await ProcessFileAsync(filePath, coverOutputDir, result, ct);
+                await ProcessFileAsync(db, filePath, coverOutputDir, result, ct);
                 result.ProcessedCount++;
             }
             catch (Exception ex)
@@ -59,10 +61,10 @@ public class MusicScanner
         return result;
     }
 
-    private async Task ProcessFileAsync(string filePath, string coverOutputDir, ScanResult result, CancellationToken ct)
+    private async Task ProcessFileAsync(ApplicationDbContext db, string filePath, string coverOutputDir, ScanResult result, CancellationToken ct)
     {
         // 检查数据库中是否已存在该文件路径
-        var existing = await _db.Songs.FirstOrDefaultAsync(s => s.FilePath == filePath, ct);
+        var existing = await db.Songs.FirstOrDefaultAsync(s => s.FilePath == filePath, ct);
 
         var tags = FileTagService.ReadTags(filePath, coverOutputDir);
         var fileInfo = new FileInfo(filePath);
@@ -70,9 +72,9 @@ public class MusicScanner
         var coverPath = tags?.CoverPath ?? FileTagService.FindCoverFile(filePath);
 
         // 确保 Artist 存在
-        var artist = await EnsureArtistAsync(tags?.Artist ?? "未知艺术家", ct);
+        var artist = await EnsureArtistAsync(db, tags?.Artist ?? "未知艺术家", ct);
         // 确保 Album 存在
-        var album = await EnsureAlbumAsync(tags?.Album ?? "未知专辑", artist.Id, coverPath, ct);
+        var album = await EnsureAlbumAsync(db, tags?.Album ?? "未知专辑", artist.Id, coverPath, ct);
 
         if (existing == null)
         {
@@ -95,7 +97,7 @@ public class MusicScanner
                 LyricsPath = lyricsPath
             };
 
-            _db.Songs.Add(song);
+            db.Songs.Add(song);
             result.AddedCount++;
         }
         else
@@ -125,34 +127,34 @@ public class MusicScanner
             }
         }
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
-    private async Task<Artist> EnsureArtistAsync(string name, CancellationToken ct)
+    private async Task<Artist> EnsureArtistAsync(ApplicationDbContext db, string name, CancellationToken ct)
     {
-        var artist = await _db.Artists.FirstOrDefaultAsync(a => a.Name == name, ct);
+        var artist = await db.Artists.FirstOrDefaultAsync(a => a.Name == name, ct);
         if (artist == null)
         {
             artist = new Artist { Name = name };
-            _db.Artists.Add(artist);
-            await _db.SaveChangesAsync(ct);
+            db.Artists.Add(artist);
+            await db.SaveChangesAsync(ct);
         }
         return artist;
     }
 
-    private async Task<Album> EnsureAlbumAsync(string title, long artistId, string? coverPath, CancellationToken ct)
+    private async Task<Album> EnsureAlbumAsync(ApplicationDbContext db, string title, long artistId, string? coverPath, CancellationToken ct)
     {
-        var album = await _db.Albums.FirstOrDefaultAsync(a => a.Title == title && a.ArtistId == artistId, ct);
+        var album = await db.Albums.FirstOrDefaultAsync(a => a.Title == title && a.ArtistId == artistId, ct);
         if (album == null)
         {
             album = new Album { Title = title, ArtistId = artistId, Cover = coverPath };
-            _db.Albums.Add(album);
-            await _db.SaveChangesAsync(ct);
+            db.Albums.Add(album);
+            await db.SaveChangesAsync(ct);
         }
         else if (!string.IsNullOrEmpty(coverPath) && string.IsNullOrEmpty(album.Cover))
         {
             album.Cover = coverPath;
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
         }
         return album;
     }
