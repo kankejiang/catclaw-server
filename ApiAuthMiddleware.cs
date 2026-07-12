@@ -22,7 +22,10 @@ public class ApiAuthMiddleware
         var path = context.Request.Path.Value ?? "";
 
         // /api/auth/* 为公共端点（注册/登录/登出/状态），不校验 AccessToken
-        if (path.StartsWith("/api/auth", StringComparison.OrdinalIgnoreCase))
+        // /api/config + /api/scan/status 为设置页展示用，无需鉴权
+        if (path.StartsWith("/api/auth", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/config", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/scan/status", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;
