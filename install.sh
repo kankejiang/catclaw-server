@@ -46,6 +46,8 @@ fi
 
 echo "📁 安装目录: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data/covers"
+# 确保容器内 app 用户（UID 1654）可写数据目录
+chmod -R a+w "$INSTALL_DIR/data" 2>/dev/null || true
 cd "$INSTALL_DIR"
 
 echo "📥 下载服务端源码..."

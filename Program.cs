@@ -157,7 +157,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 // ── 启动猫爪圈 STUN（UDP 反射端点探测，端口 = HTTP 端口 + 1）──
-var stunPort = (cliPort ?? 37823) + 1;
+var stunPort = (cliPort ?? ParsePort(config["Kestrel:EndPoints:HttpV4:Url"] ?? config["ASPNETCORE_URLS"] ?? "") ?? 37823) + 1;
 var stunService = new CatClawMusicServer.ClawCircle.ClawCircleStunService(
     app.Services.GetRequiredService<CatClawMusicServer.ClawCircle.ClawCircleTracker>(), stunPort);
 stunService.Start();
@@ -166,6 +166,17 @@ app.Lifetime.ApplicationStopping.Register(() => stunService.Stop());
 app.Run();
 
 // ── 命令行参数解析（本地函数）──
+
+// ── 从 URL 字符串中解析端口号 ──
+static int? ParsePort(string url)
+{
+    if (string.IsNullOrWhiteSpace(url)) return null;
+    var lastColon = url.LastIndexOf(':');
+    if (lastColon > 0 && int.TryParse(url[(lastColon + 1)..], out var p))
+        return p;
+    return null;
+}
+
 static Dictionary<string, string> ParseCliArgs(string[] args)
 {
     var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
