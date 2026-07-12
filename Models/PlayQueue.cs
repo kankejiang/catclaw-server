@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CatClawMusicServer.Models;
 
-public class Favorite
+public class PlayQueue
 {
     [Key]
     public long Id { get; set; }
@@ -14,10 +14,13 @@ public class Favorite
     [ForeignKey(nameof(UserId))]
     public User? User { get; set; }
 
-    public long SongId { get; set; }
+    /// <summary>JSON array of song IDs, e.g. [1,5,23,7]</summary>
+    [Required]
+    public string SongIds { get; set; } = "[]";
 
-    [ForeignKey(nameof(SongId))]
-    public Song? Song { get; set; }
+    public int CurrentIndex { get; set; }
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public long PositionMs { get; set; }
+
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
