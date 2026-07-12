@@ -38,12 +38,24 @@ public class DhtService : IDisposable
         _routing = new RoutingTable(NodeId.FromString(opts.NodeIdSeed), rtLogger);
     }
 
-    /// <summary>启动 DHT UDP 监听</summary>
+    /// <summary>启动 DHT UDP 监听（优先 IPv6 双栈，回退 IPv4）</summary>
     public void Start()
     {
         _cts = new CancellationTokenSource();
-        _udp = new UdpClient(_opts.Port, AddressFamily.InterNetwork);
-        _logger.LogInformation("DHT 服务启动: port={Port}, id={Id}", _opts.Port, _routing.LocalId);
+
+        // 优先尝试 IPv6 双栈（同时接收 IPv4 和 IPv6）
+        try
+        {
+            _udp = new UdpClient(_opts.Port, AddressFamily.InterNetworkV6);
+            _udp.Client.DualMode = true;
+            _logger.LogInformation("DHT 服务启动 (IPv6 双栈): port={Port}, id={Id}", _opts.Port, _routing.LocalId);
+        }
+        catch
+        {
+            // 回退到纯 IPv4
+            _udp = new UdpClient(_opts.Port, AddressFamily.InterNetwork);
+            _logger.LogInformation("DHT 服务启动 (IPv4): port={Port}, id={Id}", _opts.Port, _routing.LocalId);
+        }
 
         _ = ReceiveLoopAsync(_cts.Token);
         _ = MaintenanceLoopAsync(_cts.Token);
