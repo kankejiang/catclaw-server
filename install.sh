@@ -7,20 +7,17 @@
 set -e
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/catclaw-server}"
-PORT="${PORT:-37823}"
 REPO_URL="https://github.com/kankejiang/catclaw-server.git"
 
 echo "========================================"
 echo "  CatClaw Music Server 部署"
 echo "========================================"
 
-# 检查 root 权限
 if [[ $EUID -ne 0 ]]; then
    echo "❌ 请使用 root 权限运行: sudo bash install.sh"
    exit 1
 fi
 
-# 检查 / 安装 Docker
 if ! command -v docker &> /dev/null; then
     echo "📦 正在安装 Docker..."
     curl -fsSL https://get.docker.com | sh
@@ -29,15 +26,27 @@ if ! command -v docker &> /dev/null; then
     echo "✅ Docker 安装完成"
 fi
 
-# 创建安装目录
-echo "📁 创建安装目录: $INSTALL_DIR"
+# ── 先问配置 ──
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  配置（直接回车使用默认值）"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+read -p "音乐目录 [留空跳过，部署后再设]: " music_dir
+MUSIC_DIR="${music_dir:-/mnt/media/music}"
+read -p "监听端口 [37823]: " port
+PORT="${port:-37823}"
+read -p "访问令牌（留空自动生成）: " token
+ACCESS_TOKEN="${token:-$(openssl rand -hex 16)}"
+
+mkdir -p "$MUSIC_DIR" 2>/dev/null || echo "⚠️ $MUSIC_DIR 暂不可写，部署后可手动创建并放入音乐文件"
+
+# ── 下载源码 ──
+echo "📁 安装目录: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data/covers"
 cd "$INSTALL_DIR"
 
-# 下载服务端源码（sparse-checkout 只取服务端）
 echo "📥 下载服务端源码..."
 rm -rf .git catclaw-src 2>/dev/null || true
-
 git init catclaw-src
 cd catclaw-src
 git remote add origin "$REPO_URL"
@@ -48,9 +57,18 @@ cd "$INSTALL_DIR"
 mv catclaw-src/* catclaw-src/.[!.]* . 2>/dev/null || true
 rm -rf catclaw-src .git
 
-# 创建 docker-compose.yml
-echo "📝 创建 docker-compose.yml..."
-cat > docker-compose.yml << 'COMPOSE'
+# ── 写 .env（部署后可随时修改）──
+echo "📝 写入配置..."
+cat > .env << ENV
+# 音乐目录
+MUSIC=${MUSIC_DIR}
+# 监听端口
+PORT=${PORT}
+# 访问令牌
+ACCESS_TOKEN=${ACCESS_TOKEN}
+ENV
+
+cat > docker-compose.yml << COMPOSE
 services:
   catclaw-server:
     build: .
@@ -61,37 +79,17 @@ services:
       - MusicServer__MusicDirectory=/music
       - MusicServer__DbPath=/data/catclaw.db
       - MusicServer__CoverOutputDir=/data/covers
-      - MusicServer__AccessToken=${ACCESS_TOKEN:-}
+      - MusicServer__AccessToken=\${ACCESS_TOKEN}
       - MusicServer__AdminUser=admin
       - MusicServer__AdminPassword=
-      - ASPNETCORE_URLS=http://0.0.0.0:${PORT:-37823}
+      - ASPNETCORE_URLS=http://0.0.0.0:\${PORT}
     volumes:
-      - ${MUSIC_DIR:-/mnt/media/music}:/music
+      - \${MUSIC}:/music
       - ./data:/data
 COMPOSE
 
-# 问用户配置
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  配置信息（直接回车使用默认值）"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-read -p "音乐目录路径 [/mnt/media/music]: " music_dir
-MUSIC_DIR="${music_dir:-/mnt/media/music}"
-read -p "监听端口 [37823]: " port
-PORT="${port:-37823}"
-read -p "访问令牌（留空自动生成）: " token
-ACCESS_TOKEN="${token:-$(openssl rand -hex 16)}"
-
-mkdir -p "$MUSIC_DIR" 2>/dev/null || echo "⚠️ 音乐目录 $MUSIC_DIR 不存在，请确保有音乐文件"
-
-# 替换环境变量
-sed -i "s|\${MUSIC_DIR:-/mnt/media/music}|${MUSIC_DIR}|g" docker-compose.yml
-sed -i "s|\${PORT:-37823}|${PORT}|g" docker-compose.yml
-sed -i "s|\${ACCESS_TOKEN:-}|${ACCESS_TOKEN}|g" docker-compose.yml
-
-# 构建并启动
-echo ""
-echo "🔨 正在构建 Docker 镜像（首次约 2-3 分钟）..."
+# ── 构建并启动 ──
+echo "🔨 构建 Docker 镜像（首次约 2-3 分钟）..."
 docker compose up -d --build
 
 echo "⏳ 等待服务启动..."
@@ -106,7 +104,11 @@ if docker compose ps | grep -q "Up"; then
     echo "Web 管理:  http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'NAS_IP'):${PORT}"
     echo "访问令牌:  ${ACCESS_TOKEN}"
     echo ""
-    echo "首次使用会自动进入注册页创建管理员"
+    echo "浏览器打开 → 注册管理员 → 开始使用"
+    echo ""
+    echo "📁 添加音乐文件夹："
+    echo "  ① 单目录：编辑 .env 改 MUSIC= → docker compose up -d"
+    echo "  ② 多目录：编辑 docker-compose.yml volumes 追加 → docker compose up -d"
     echo ""
     echo "常用命令:"
     echo "  查看日志:  docker compose logs -f"
