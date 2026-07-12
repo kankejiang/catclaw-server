@@ -110,21 +110,28 @@ CatClawMusicServer.exe claw reset
 
 ## GitHub Actions 自动构建 Docker 镜像
 
-每次推送到 `main` 分支会自动构建并推送到 **GitHub Container Registry** (`ghcr.io`)。
+每次推送到 `main` 分支会自动构建并推送到 **GitHub Container Registry** (`ghcr.io/kankejiang/catclaw-server`)。
 
 首次使用需要：
 1. 在 GitHub 仓库 Settings → Actions → General → Workflow permissions 中勾选 "Read and write permissions"
 2. 推送代码后，在 Actions 标签页查看构建状态
 3. 构建成功后，在 Packages 页面将镜像设为 Public（Settings → Packages → 选中镜像 → Change visibility → Public）
 
+## 项目地址
+
+- **GitHub**（主仓库）：https://github.com/kankejiang/catclaw-server
+- **Gitee**（国内镜像）：https://gitee.com/kankejiang/catclaw-server
+
 ## NAS / Docker 部署
 
 ### 方式一：docker compose 构建（本地编译）
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/你的用户名/CatClawMusicServer.git
-cd CatClawMusicServer
+# 1. 克隆仓库（国内用 Gitee 更快）
+git clone https://github.com/kankejiang/catclaw-server.git
+# 或
+git clone https://gitee.com/kankejiang/catclaw-server.git
+cd catclaw-server
 
 # 2. 编辑 docker-compose.yml，修改：
 #    - AccessToken（强随机令牌）
@@ -140,13 +147,12 @@ docker compose up -d
 git pull && docker compose up -d --build
 ```
 
-### 方式二：拉取预构建镜像（推荐）
+### 方式二：拉取预构建镜像（推荐，无需编译）
 
 ```bash
 # 1. 复制 docker-compose.prod.yml 到 NAS 上，重命名为 docker-compose.yml
-# 2. 修改 image 为你的 ghcr.io 镜像地址
-# 3. 修改 AccessToken 和音乐目录路径
-# 4. 启动
+# 2. 修改 AccessToken 和音乐目录路径（image 已指向 ghcr.io/kankejiang/catclaw-server）
+# 3. 启动
 docker compose up -d
 ```
 
