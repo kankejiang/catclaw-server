@@ -48,8 +48,26 @@ public class Song
     [MaxLength(1000)]
     public string? LyricsPath { get; set; }
 
+    // ── V2 音频属性 ──
+    public int SampleRate { get; set; }
+    public int BitDepth { get; set; }
+    public int Channels { get; set; }
+
+    [MaxLength(20)]
+    public string Codec { get; set; } = "";
+
+    public bool IsLossless { get; set; }
+
+    [MaxLength(10)]
+    public string? DiscNumber { get; set; }
+
+    public long? FileHash { get; set; }
+
     // 导航属性（用于播放列表关联）
     public ICollection<PlaylistSong>? PlaylistSongs { get; set; }
     public ICollection<Favorite>? Favorites { get; set; }
     public ICollection<PlayHistory>? PlayHistories { get; set; }
+    public ICollection<Scrobble>? Scrobbles { get; set; }
+    public ICollection<Rating>? Ratings { get; set; }
+    public ICollection<SongGenre>? SongGenres { get; set; }
 }

@@ -1,8 +1,13 @@
 using CatClawMusicServer;
 using CatClawMusicServer.ClawCircle;
+using CatClawMusicServer.ClawCircle.Dht;
+using CatClawMusicServer.ClawCircle.Transfer;
 using CatClawMusicServer.Data;
 using CatClawMusicServer.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 
@@ -32,11 +37,11 @@ if (cliPort.HasValue)
 }
 
 // ── 服务注册 ──
-// EF Core SQLite
-builder.Services.AddDbContext<ApplicationDbContext>(opt =>
-    opt.UseSqlite($"Data Source={dbPath}"));
+// EF Core SQLite — Factory (Singleton) + scoped DbContext (from factory)
 builder.Services.AddDbContextFactory<ApplicationDbContext>(opt =>
     opt.UseSqlite($"Data Source={dbPath}"));
+builder.Services.AddScoped<ApplicationDbContext>(sp =>
+    sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
 
 // 音乐扫描服务
 builder.Services.AddScoped<MusicScanner>();
@@ -55,6 +60,79 @@ builder.Services.AddSingleton<AdminCredentialStore>(sp =>
 
 // 猫爪圈 P2P tracker 在线节点注册表（单例）
 builder.Services.AddSingleton<ClawCircleTracker>();
+builder.Services.AddSingleton<NodeReputation>();
+builder.Services.AddSingleton<TransferEngine>();
+
+// DHT 配置
+var dhtSection = builder.Configuration.GetSection("ClawCircle");
+var dhtOpts = new DhtOptions
+{
+    Enabled = bool.TryParse(dhtSection["DhtEnabled"], out var de) && de,
+    Port = int.TryParse(dhtSection["DhtPort"], out var dp) ? dp : 37825,
+    NodeIdSeed = dhtSection["NodeIdSeed"] ?? "catclaw-default-node"
+};
+var bootstrapStr = dhtSection["BootstrapNodes"];
+if (!string.IsNullOrEmpty(bootstrapStr))
+    dhtOpts.BootstrapNodes = bootstrapStr.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+builder.Services.AddSingleton(dhtOpts);
+builder.Services.AddSingleton<DhtService>();
+
+// ── JWT 认证配置 ──
+var jwtSection = builder.Configuration.GetSection("Jwt");
+var jwtSecretKey = jwtSection["SecretKey"] ?? "CatClawMusic-Default-Secret-Change-In-Production-2024!";
+var jwtIssuer = jwtSection["Issuer"] ?? "CatClawMusicServer";
+var jwtAudience = jwtSection["Audience"] ?? "CatClawMusicClient";
+var accessExpireMin = int.TryParse(jwtSection["AccessTokenExpireMinutes"], out var aem) ? aem : 15;
+var refreshExpireDays = int.TryParse(jwtSection["RefreshTokenExpireDays"], out var red) ? red : 30;
+
+builder.Services.AddSingleton(new JwtOptions
+{
+    SecretKey = jwtSecretKey,
+    Issuer = jwtIssuer,
+    Audience = jwtAudience,
+    AccessTokenExpireMinutes = accessExpireMin,
+    RefreshTokenExpireDays = refreshExpireDays
+});
+builder.Services.AddSingleton<JwtService>();
+
+// ── 流媒体配置 ──
+var streamSection = builder.Configuration.GetSection("Streaming");
+var streamOpts = new StreamingOptions
+{
+    HlsEnabled = bool.TryParse(streamSection["HlsEnabled"], out var he) && he,
+    TranscodeCacheSizeGB = int.TryParse(streamSection["TranscodeCacheSizeGB"], out var tc) ? tc : 2,
+    FFmpegPath = streamSection["FFmpegPath"] ?? "ffmpeg",
+    SegmentDurationSeconds = int.TryParse(streamSection["SegmentDurationSeconds"], out var sd) ? sd : 6,
+    MaxConcurrentTranscodes = int.TryParse(streamSection["MaxConcurrentTranscodes"], out var mc) ? mc : 4,
+    TranscodeDir = streamSection["TranscodeDir"] ?? "Data/transcode"
+};
+var brStr = streamSection["DefaultBitrates"];
+if (!string.IsNullOrEmpty(brStr))
+    streamOpts.DefaultBitrates = brStr.Split(',').Select(s => int.TryParse(s.Trim(), out var b) ? b : 0).Where(b => b > 0).ToArray();
+
+builder.Services.AddSingleton(streamOpts);
+builder.Services.AddSingleton<TranscodingService>();
+builder.Services.AddSingleton<CoverService>();
+builder.Services.AddSingleton<EventBus>();
+builder.Services.AddScoped<StatsService>();
+builder.Services.AddScoped<RecommendService>();
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecretKey)),
+            ClockSkew = TimeSpan.FromMinutes(1)
+        };
+    });
+builder.Services.AddAuthorization();
 
 // ASP.NET Core MVC + Controllers
 builder.Services.AddControllers()
@@ -147,6 +225,7 @@ app.UseStaticFiles();   // 服务 wwwroot 静态文件
 
 app.UseRateLimiter();    // ← .NET 8 内置限速
 
+app.UseAuthentication();  // JWT Bearer 认证（/api/v1/* 路由）
 app.UseAuthorization();
 
 app.MapControllers();
@@ -164,6 +243,24 @@ var stunService = new CatClawMusicServer.ClawCircle.ClawCircleStunService(
     app.Services.GetRequiredService<CatClawMusicServer.ClawCircle.ClawCircleTracker>(), stunPort);
 stunService.Start();
 app.Lifetime.ApplicationStopping.Register(() => stunService.Stop());
+
+// ── 启动 DHT 服务（可选，Kademlia 去中心化节点发现）──
+var dhtOptions = app.Services.GetRequiredService<DhtOptions>();
+if (dhtOptions.Enabled)
+{
+    var dhtService = app.Services.GetRequiredService<DhtService>();
+    dhtService.Start();
+    app.Lifetime.ApplicationStopping.Register(() => dhtService.Stop());
+
+    // Bootstrap 连接（支持域名和 IP）
+    foreach (var bootstrap in dhtOptions.BootstrapNodes)
+    {
+        if (!string.IsNullOrEmpty(bootstrap))
+        {
+            _ = dhtService.BootstrapFromAddressAsync(bootstrap);
+        }
+    }
+}
 
 app.Run();
 

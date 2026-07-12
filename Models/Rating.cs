@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CatClawMusicServer.Models;
 
-public class Favorite
+public class Rating
 {
     [Key]
     public long Id { get; set; }
@@ -18,6 +18,8 @@ public class Favorite
 
     [ForeignKey(nameof(SongId))]
     public Song? Song { get; set; }
+
+    public int Score { get; set; } // 1-5
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -13,14 +13,27 @@ echo "========================================"
 
 # 1. 拉取最新源码
 echo "📥 拉取最新代码..."
+# 备份配置
+cp docker-compose.yml /tmp/docker-compose.yml.bak 2>/dev/null || true
+cp .env /tmp/catclaw-env.bak 2>/dev/null || true
 if [ -d .git ]; then
-    git pull origin master --depth=1 2>/dev/null || git pull origin master
+    git fetch origin master --depth=1 2>/dev/null || true
+    git reset --hard FETCH_HEAD 2>/dev/null || {
+        rm -rf .git
+        git init .
+        git remote add origin https://github.com/kankejiang/catclaw-server.git 2>/dev/null || git remote set-url origin https://github.com/kankejiang/catclaw-server.git
+        git fetch origin master --depth=1
+        git reset --hard FETCH_HEAD
+    }
 else
     git init . 2>/dev/null || true
     git remote add origin https://github.com/kankejiang/catclaw-server.git 2>/dev/null || git remote set-url origin https://github.com/kankejiang/catclaw-server.git
     git fetch origin master --depth=1
     git reset --hard FETCH_HEAD
 fi
+# 恢复配置
+cp /tmp/docker-compose.yml.bak docker-compose.yml 2>/dev/null || true
+cp /tmp/catclaw-env.bak .env 2>/dev/null || true
 
 # 2. 重建镜像（无缓存，确保新代码生效）
 echo "🔨 重建 Docker 镜像（无缓存）..."

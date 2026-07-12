@@ -4,7 +4,8 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CatClawMusicServer.Models;
 
-public class Favorite
+/// <summary>每日播放统计预聚合（按用户+日期）</summary>
+public class StatsDaily
 {
     [Key]
     public long Id { get; set; }
@@ -14,10 +15,11 @@ public class Favorite
     [ForeignKey(nameof(UserId))]
     public User? User { get; set; }
 
-    public long SongId { get; set; }
+    public DateTime Date { get; set; }
 
-    [ForeignKey(nameof(SongId))]
-    public Song? Song { get; set; }
+    public int PlayCount { get; set; }
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public long TotalDurationMs { get; set; }
+
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

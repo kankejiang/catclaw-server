@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 
+using CatClawMusicServer.Services;
+
 namespace CatClawMusicServer;
 
 /// <summary>
@@ -17,15 +19,23 @@ public class ApiAuthMiddleware
 
     public ApiAuthMiddleware(RequestDelegate next) => _next = next;
 
-    public async Task InvokeAsync(HttpContext context, ServerAuthOptions auth)
+    public async Task InvokeAsync(HttpContext context, ServerAuthOptions auth, JwtService jwtService)
     {
         var path = context.Request.Path.Value ?? "";
 
-        // /api/auth/* 为公共端点（注册/登录/登出/状态），不校验 AccessToken
+        // /api/auth/* 和 /api/v1/auth/* 为公共端点（注册/登录/登出/状态），不校验 AccessToken
         // /api/config + /api/scan/status 为设置页展示用，无需鉴权
         if (path.StartsWith("/api/auth", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/v1/auth", StringComparison.OrdinalIgnoreCase) ||
             path.Equals("/api/config", StringComparison.OrdinalIgnoreCase) ||
             path.Equals("/api/scan/status", StringComparison.OrdinalIgnoreCase))
+        {
+            await _next(context);
+            return;
+        }
+
+        // /api/v1/* 由 ASP.NET Core JWT Bearer 中间件处理认证，此处放行
+        if (path.StartsWith("/api/v1/", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;
@@ -54,7 +64,17 @@ public class ApiAuthMiddleware
             {
                 var authHeader = context.Request.Headers["Authorization"].ToString();
                 if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-                    ok = authHeader["Bearer ".Length..].Trim() == auth.AccessToken;
+                {
+                    var token = authHeader["Bearer ".Length..].Trim();
+                    // 先检查静态 AccessToken
+                    ok = token == auth.AccessToken;
+                    // 再检查 JWT
+                    if (!ok)
+                    {
+                        var principal = jwtService.ValidateToken(token);
+                        ok = principal != null;
+                    }
+                }
 
                 // Web UI 登录后 cookie 也视为鉴权通过
                 if (!ok)

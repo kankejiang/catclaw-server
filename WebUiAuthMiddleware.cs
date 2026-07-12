@@ -1,10 +1,12 @@
+using CatClawMusicServer.Data;
+using Microsoft.EntityFrameworkCore;
+
 namespace CatClawMusicServer;
 
 /// <summary>
-/// 保护静态 HTML 页面（含根路径 "/"，UseDefaultFiles 会将其解析为 index.html）。
-/// 注册页仅未配置管理员时放行；已配置后访问注册页直接跳登录页。
-/// 登录页、API/WebSocket、静态资源始终放行。
-/// 重定向采用 HTTP 302 + No-Cache + meta refresh 三重保险，避免浏览器缓存导致不跳。
+/// 保护静态 HTML 页面。
+/// 当数据库存在用户时（JWT 认证已启用），跳过此中间件 — 由 Vue SPA 前端处理 JWT 认证。
+/// 仅当数据库无用户且管理员未配置时，引导到注册页。
 /// </summary>
 public class WebUiAuthMiddleware
 {
@@ -12,9 +14,24 @@ public class WebUiAuthMiddleware
 
     public WebUiAuthMiddleware(RequestDelegate next) => _next = next;
 
-    public async Task InvokeAsync(HttpContext context, AdminCredentialStore store)
+    public async Task InvokeAsync(HttpContext context, AdminCredentialStore store, ApplicationDbContext db)
     {
         var path = context.Request.Path.Value ?? "";
+
+        // ── 当数据库已有用户时，JWT 认证由 Vue SPA 处理，此中间件全部放行 ──
+        try
+        {
+            var hasUsers = await db.Users.AnyAsync();
+            if (hasUsers)
+            {
+                await _next(context);
+                return;
+            }
+        }
+        catch
+        {
+            // 数据库不存在或尚未迁移 — 继续走旧逻辑
+        }
 
         bool isLoginPage = path.EndsWith("/login.html", StringComparison.OrdinalIgnoreCase);
         bool isRegisterPage = path.EndsWith("/register.html", StringComparison.OrdinalIgnoreCase);
