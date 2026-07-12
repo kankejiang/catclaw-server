@@ -2,6 +2,7 @@
 # ============================================
 #  CatClaw Music Server 一键部署脚本 (GitHub)
 #  国内访问慢建议改用 install_gitee.sh
+#  已安装 → 增量更新；未安装 → 全新部署
 # ============================================
 
 set -e
@@ -25,6 +26,55 @@ if ! command -v docker &> /dev/null; then
     systemctl start docker
     echo "✅ Docker 安装完成"
 fi
+
+# ── 检测是否已安装 ──
+if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    echo ""
+    echo "🔍 检测到已安装，切换到增量更新模式..."
+    echo "   （保留配置、数据库、管理员账号）"
+    echo ""
+
+    cd "$INSTALL_DIR"
+
+    echo "📥 拉取最新代码..."
+    if [ -d .git ]; then
+        git fetch origin master --depth=1 2>/dev/null || true
+        git reset --hard FETCH_HEAD 2>/dev/null || {
+            rm -rf .git
+            git init .
+            git remote add origin "$REPO_URL"
+            git fetch origin master --depth=1
+            git reset --hard FETCH_HEAD
+        }
+    else
+        git init .
+        git remote add origin "$REPO_URL" 2>/dev/null || git remote set-url origin "$REPO_URL"
+        git fetch origin master --depth=1
+        git reset --hard FETCH_HEAD
+    fi
+
+    echo "🔨 重建 Docker 镜像（无缓存）..."
+    docker compose build --no-cache
+
+    echo "🔄 重启服务..."
+    docker compose up -d
+
+    sleep 5
+    if docker compose ps | grep -q "Up"; then
+        echo ""
+        echo "========================================"
+        echo "  ✅ 更新完成！"
+        echo "========================================"
+        echo ""
+        PORT=$(grep -oP 'ASPNETCORE_URLS.*?:\K\d+' docker-compose.yml 2>/dev/null || echo "37823")
+        echo "Web 管理: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'NAS_IP'):${PORT}"
+    else
+        echo "❌ 启动失败，查看日志: docker compose logs"
+    fi
+    exit 0
+fi
+
+# ── 全新部署 ──
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
