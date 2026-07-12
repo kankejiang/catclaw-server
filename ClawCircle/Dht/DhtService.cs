@@ -38,24 +38,12 @@ public class DhtService : IDisposable
         _routing = new RoutingTable(NodeId.FromString(opts.NodeIdSeed), rtLogger);
     }
 
-    /// <summary>启动 DHT UDP 监听（优先 IPv6 双栈，回退 IPv4）</summary>
+    /// <summary>启动 DHT UDP 监听（IPv4，兼容 Docker bridge 端口映射）</summary>
     public void Start()
     {
         _cts = new CancellationTokenSource();
-
-        // 优先尝试 IPv6 双栈（同时接收 IPv4 和 IPv6）
-        try
-        {
-            _udp = new UdpClient(_opts.Port, AddressFamily.InterNetworkV6);
-            _udp.Client.DualMode = true;
-            _logger.LogInformation("DHT 服务启动 (IPv6 双栈): port={Port}, id={Id}", _opts.Port, _routing.LocalId);
-        }
-        catch
-        {
-            // 回退到纯 IPv4
-            _udp = new UdpClient(_opts.Port, AddressFamily.InterNetwork);
-            _logger.LogInformation("DHT 服务启动 (IPv4): port={Port}, id={Id}", _opts.Port, _routing.LocalId);
-        }
+        _udp = new UdpClient(_opts.Port, AddressFamily.InterNetwork);
+        _logger.LogInformation("DHT 服务启动 (IPv4): port={Port}, id={Id}", _opts.Port, _routing.LocalId);
 
         _ = ReceiveLoopAsync(_cts.Token);
         _ = MaintenanceLoopAsync(_cts.Token);
@@ -93,7 +81,7 @@ public class DhtService : IDisposable
         }
     }
 
-    /// <summary>从字符串地址 Bootstrap（支持 host:port 域名解析）</summary>
+    /// <summary>从字符串地址 Bootstrap（优先 IPv4，兼容 Docker bridge）</summary>
     public async Task<bool> BootstrapFromAddressAsync(string address)
     {
         if (string.IsNullOrEmpty(address) || !address.Contains(':'))
@@ -109,13 +97,23 @@ public class DhtService : IDisposable
             var addresses = await System.Net.Dns.GetHostAddressesAsync(host);
             if (addresses.Length == 0) return false;
 
-            var ep = new IPEndPoint(addresses[0], port);
+            // 优先使用 IPv4（兼容 Docker bridge 端口映射）
+            var ipv4 = addresses.FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+            var target = ipv4 ?? addresses[0];
+
+            if (target.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+            {
+                _logger.LogWarning("DHT Bootstrap: {Host} 仅有 IPv6 地址，DHT 需要 IPv4（请添加 A 记录或使用局域网 IP）", host);
+                return false;
+            }
+
+            var ep = new IPEndPoint(target, port);
             await BootstrapAsync(ep);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "DHT Bootstrap DNS 解析失败: {Host}", host);
+            _logger.LogWarning(ex, "DHT Bootstrap 失败: {Host}", host);
             return false;
         }
     }
@@ -405,7 +403,7 @@ public class DhtOptions
     public bool Enabled { get; set; } = true;
     public int Port { get; set; } = 37825;
     public string NodeIdSeed { get; set; } = "catclaw-default-node";
-    public List<string> BootstrapNodes { get; set; } = new() { "nas.08102516.xyz:37825" };
+    public List<string> BootstrapNodes { get; set; } = new() { "10.0.0.101:37825" };
 }
 
 // ── RPC 消息 ──
