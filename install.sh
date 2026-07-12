@@ -26,7 +26,6 @@ if ! command -v docker &> /dev/null; then
     echo "✅ Docker 安装完成"
 fi
 
-# ── 先问配置 ──
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  配置（直接回车使用默认值）"
@@ -40,7 +39,6 @@ ACCESS_TOKEN="${token:-$(openssl rand -hex 16)}"
 
 mkdir -p "$MUSIC_DIR" 2>/dev/null || echo "⚠️ $MUSIC_DIR 暂不可写，部署后可手动创建并放入音乐文件"
 
-# ── 下载源码 ──
 echo "📁 安装目录: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data/covers"
 cd "$INSTALL_DIR"
@@ -57,14 +55,10 @@ cd "$INSTALL_DIR"
 mv catclaw-src/* catclaw-src/.[!.]* . 2>/dev/null || true
 rm -rf catclaw-src .git
 
-# ── 写 .env（部署后可随时修改）──
 echo "📝 写入配置..."
 cat > .env << ENV
-# 音乐目录
 MUSIC=${MUSIC_DIR}
-# 监听端口
 PORT=${PORT}
-# 访问令牌
 ACCESS_TOKEN=${ACCESS_TOKEN}
 ENV
 
@@ -79,16 +73,15 @@ services:
       - MusicServer__MusicDirectory=/music
       - MusicServer__DbPath=/data/catclaw.db
       - MusicServer__CoverOutputDir=/data/covers
-      - MusicServer__AccessToken=\${ACCESS_TOKEN}
+      - MusicServer__AccessToken=${ACCESS_TOKEN}
       - MusicServer__AdminUser=admin
       - MusicServer__AdminPassword=
-      - ASPNETCORE_URLS=http://0.0.0.0:\${PORT}
+      - ASPNETCORE_URLS=http://0.0.0.0:${PORT}
     volumes:
-      - \${MUSIC}:/music
+      - ${MUSIC_DIR}:/music
       - ./data:/data
 COMPOSE
 
-# ── 构建并启动 ──
 echo "🔨 构建 Docker 镜像（首次约 2-3 分钟）..."
 docker compose up -d --build
 
@@ -107,12 +100,11 @@ if docker compose ps | grep -q "Up"; then
     echo "浏览器打开 → 注册管理员 → 开始使用"
     echo ""
     echo "📁 添加音乐文件夹："
-    echo "  ① 单目录：编辑 .env 改 MUSIC= → docker compose up -d"
-    echo "  ② 多目录：编辑 docker-compose.yml volumes 追加 → docker compose up -d"
+    echo "  编辑 docker-compose.yml 中 volumes 的 ${MUSIC_DIR} → docker compose up -d"
     echo ""
     echo "常用命令:"
     echo "  查看日志:  docker compose logs -f"
-    echo "  重启服务:  docker compose restart"
+    echo "  重启服务:  docker compose up -d"
     echo "  停止服务:  docker compose down"
     echo "  重置管理员: docker exec catclaw-server dotnet CatClawMusicServer.dll claw reset"
     echo ""
