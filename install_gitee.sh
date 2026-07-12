@@ -43,7 +43,7 @@ cd catclaw-src
 git remote add origin "$REPO_URL"
 git config core.sparseCheckout true
 echo "/*" > .git/info/sparse-checkout
-git pull origin main --depth=1
+git pull origin master --depth=1
 cd "$INSTALL_DIR"
 mv catclaw-src/* catclaw-src/.[!.]* . 2>/dev/null || true
 rm -rf catclaw-src .git
