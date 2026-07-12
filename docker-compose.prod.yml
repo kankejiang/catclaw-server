@@ -15,13 +15,13 @@ services:
     restart: unless-stopped
     network_mode: host  # 使用 host 网络模式以便 UDP 打洞和 IPv6
     environment:
-      - MusicServer__MusicDirectory=/music
-      - MusicServer__DbPath=/data/catclaw.db
-      - MusicServer__CoverOutputDir=/data/covers
-      - MusicServer__AccessToken=请改成你自己的强随机令牌
-      - MusicServer__AdminUser=admin
-      - MusicServer__AdminPassword=
-      - ASPNETCORE_URLS=http://0.0.0.0:37823
+      MusicServer__MusicDirectory: /music
+      MusicServer__DbPath: /data/catclaw.db
+      MusicServer__CoverOutputDir: /data/covers
+      MusicServer__AccessToken: 请改成你自己的强随机令牌
+      MusicServer__AdminUser: admin
+      MusicServer__AdminPassword: ""
+      ASPNETCORE_URLS: "http://0.0.0.0:37823"
     volumes:
       - /mnt/media/music:/music          # ← 改成你的音乐目录
       - ./catclaw-data:/data              # 数据持久化到当前目录

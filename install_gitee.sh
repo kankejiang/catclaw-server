@@ -73,13 +73,13 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      - MusicServer__MusicDirectory=/music
-      - MusicServer__DbPath=/data/catclaw.db
-      - MusicServer__CoverOutputDir=/data/covers
-      - MusicServer__AccessToken=${ACCESS_TOKEN}
-      - MusicServer__AdminUser=admin
-      - MusicServer__AdminPassword=""
-      - ASPNETCORE_URLS=http://0.0.0.0:${PORT}
+      MusicServer__MusicDirectory: /music
+      MusicServer__DbPath: /data/catclaw.db
+      MusicServer__CoverOutputDir: /data/covers
+      MusicServer__AccessToken: ${ACCESS_TOKEN}
+      MusicServer__AdminUser: admin
+      MusicServer__AdminPassword: ""
+      ASPNETCORE_URLS: "http://0.0.0.0:${PORT}"
     volumes:
       - ${MUSIC_DIR}:/music
       - ./data:/data
