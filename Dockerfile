@@ -9,8 +9,10 @@ RUN dotnet publish CatClawMusicServer.csproj -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
-# 安装 FFmpeg（HLS 转码需要）
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# 安装 FFmpeg（使用阿里云镜像加速）
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null; \
+    sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null; \
+    apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/publish .
