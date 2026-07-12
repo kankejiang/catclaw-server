@@ -569,8 +569,8 @@ async function loadSettings(container) {
   container.innerHTML = html;
 
   // 加载音乐目录配置
-  fetch('/appsettings.json').then(r=>r.json()).then(cfg=>{
-    const dir = cfg?.MusicServer?.MusicDirectory || '(未配置)';
+  fetch('/api/config').then(r=>r.json()).then(cfg=>{
+    const dir = cfg?.musicDirectory || '(未配置)';
     document.getElementById('setting-music-dir').textContent = dir;
   }).catch(()=>{
     document.getElementById('setting-music-dir').textContent = '(无法读取配置)';
