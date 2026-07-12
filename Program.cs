@@ -35,6 +35,8 @@ if (cliPort.HasValue)
 // EF Core SQLite
 builder.Services.AddDbContext<ApplicationDbContext>(opt =>
     opt.UseSqlite($"Data Source={dbPath}"));
+builder.Services.AddDbContextFactory<ApplicationDbContext>(opt =>
+    opt.UseSqlite($"Data Source={dbPath}"));
 
 // 音乐扫描服务
 builder.Services.AddScoped<MusicScanner>();
