@@ -390,7 +390,7 @@ public class DhtService : IDisposable
 
 public class DhtOptions
 {
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
     public int Port { get; set; } = 37825;
     public string NodeIdSeed { get; set; } = "catclaw-default-node";
     public List<string> BootstrapNodes { get; set; } = new() { "nas.08102516.xyz:37825" };
