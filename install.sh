@@ -37,6 +37,9 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
     cd "$INSTALL_DIR"
 
     echo "📥 拉取最新代码..."
+    # 备份配置
+    cp docker-compose.yml /tmp/docker-compose.yml.bak 2>/dev/null || true
+    cp .env /tmp/catclaw-env.bak 2>/dev/null || true
     if [ -d .git ]; then
         git fetch origin master --depth=1 2>/dev/null || true
         git reset --hard FETCH_HEAD 2>/dev/null || {
@@ -52,6 +55,9 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
         git fetch origin master --depth=1
         git reset --hard FETCH_HEAD
     fi
+    # 恢复配置
+    cp /tmp/docker-compose.yml.bak docker-compose.yml 2>/dev/null || true
+    cp /tmp/catclaw-env.bak .env 2>/dev/null || true
 
     echo "🔨 重建 Docker 镜像（无缓存）..."
     docker compose build --no-cache
