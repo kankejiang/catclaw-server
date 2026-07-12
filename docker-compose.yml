@@ -1,19 +1,19 @@
+# CatClaw Music Server — 一键部署
+# 使用方法：
+#   1. 把 /mnt/media/music 改成你的音乐目录
+#   2. docker compose up -d --build
+#   3. 浏览器打开 http://NAS-IP:37823 注册管理员
+
 services:
   catclaw-server:
     build: .
     container_name: catclaw-server
     restart: unless-stopped
-    ports:
-      - "37823:37823"         # HTTP / WebSocket / Web UI
-      - "37824:37824/udp"     # STUN（NAT 打洞）
-      - "37825:37825/udp"     # DHT（节点发现）
+    network_mode: host  # host 网络：IPv6 + UDP 打洞 + DHT 自动可用
     environment:
-      # ── 音乐目录（挂载到容器 /music）──
       MusicServer__MusicDirectory: /music
-      # ── 数据库与封面（持久化到卷 /data）──
       MusicServer__DbPath: /data/catclaw.db
       MusicServer__CoverOutputDir: /data/covers
-      # ── 访问令牌 ──
       MusicServer__AccessToken: ""
       MusicServer__AdminUser: admin
       MusicServer__AdminPassword: ""
@@ -26,9 +26,5 @@ services:
       ClawCircle__DhtEnabled: "true"
       ClawCircle__DhtPort: "37825"
     volumes:
-      # ← 改成你 NAS 上的音乐目录
-      - /path/to/your/music:/music
-      - catclaw-data:/data
-
-volumes:
-  catclaw-data:
+      - /mnt/media/music:/music          # ← 改成你的音乐目录
+      - ./catclaw-data:/data
