@@ -4,6 +4,8 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CatClawMusicServer.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace CatClawMusicServer.ClawCircle.Dht;
 
@@ -17,25 +19,35 @@ public class DhtService : IDisposable
     private readonly RoutingTable _routing;
     private readonly ConcurrentKeyValueStore _store;
     private readonly ILogger<DhtService> _logger;
+    private readonly IDbContextFactory<ApplicationDbContext>? _dbFactory;
 
     private UdpClient? _udp;
     private CancellationTokenSource? _cts;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<DhtRpcResponse>> _pendingRpcs = new();
     private readonly Random _rand = new();
 
+    // 曲库索引
+    private BloomFilter? _libraryFilter;
+    private int _librarySongCount;
+    private DateTime _lastLibraryPublish = DateTime.MinValue;
+
     public NodeId LocalId => _routing.LocalId;
     public int NodeCount => _routing.TotalNodes;
     public int StoreCount => _store.Count;
+    public int LibrarySongCount => _librarySongCount;
+    public DateTime LastLibraryPublish => _lastLibraryPublish;
 
     /// <summary>获取路由表中所有已知节点</summary>
     public List<DhtNode> GetAllNodes() => _routing.GetAllNodes();
 
-    public DhtService(DhtOptions opts, ILogger<DhtService> logger, ILogger<RoutingTable> rtLogger)
+    public DhtService(DhtOptions opts, ILogger<DhtService> logger, ILogger<RoutingTable> rtLogger,
+        IDbContextFactory<ApplicationDbContext>? dbFactory = null)
     {
         _opts = opts;
         _logger = logger;
         _store = new ConcurrentKeyValueStore();
         _routing = new RoutingTable(NodeId.FromString(opts.NodeIdSeed), rtLogger);
+        _dbFactory = dbFactory;
     }
 
     /// <summary>启动 DHT UDP 监听（IPv6 双栈 + IPv4 回退）</summary>
@@ -366,19 +378,118 @@ public class DhtService : IDisposable
         await _udp!.SendAsync(bytes, bytes.Length, target);
     }
 
-    /// <summary>后台维护：刷新路由表、重新发布存储</summary>
+    /// <summary>后台维护：刷新路由表、发布曲库索引</summary>
     private async Task MaintenanceLoopAsync(CancellationToken ct)
     {
+        // 首次启动延迟 10 秒，等待 bootstrap 完成
+        await Task.Delay(TimeSpan.FromSeconds(10), ct);
+        await PublishLibraryIndexAsync();
+
         while (!ct.IsCancellationRequested)
         {
             await Task.Delay(TimeSpan.FromMinutes(5), ct);
 
-            // 刷新路由表 — 随机查找自己附近的节点
+            // 刷新路由表
             var randomId = NodeId.Random();
             await IterativeFindNodeAsync(randomId);
 
-            _logger.LogDebug("DHT 维护: {Summary}", _routing.Summary());
+            // 每 30 分钟重新发布曲库索引
+            if ((DateTime.UtcNow - _lastLibraryPublish).TotalMinutes >= 30)
+                await PublishLibraryIndexAsync();
+
+            _logger.LogDebug("DHT 维护: {Summary}, 曲库={Songs}首", _routing.Summary(), _librarySongCount);
         }
+    }
+
+    /// <summary>构建并发布曲库 Bloom Filter 索引到 DHT</summary>
+    public async Task PublishLibraryIndexAsync()
+    {
+        if (_dbFactory == null) return;
+
+        try
+        {
+            using var db = _dbFactory.CreateDbContext();
+            var songKeys = await db.Songs
+                .Include(s => s.Artist)
+                .AsNoTracking()
+                .Select(s => (s.Artist!.Name + "\x01" + s.Title).ToLowerInvariant())
+                .ToListAsync();
+
+            if (songKeys.Count == 0)
+            {
+                _logger.LogDebug("曲库为空，跳过索引发布");
+                return;
+            }
+
+            // 构建 Bloom Filter
+            _libraryFilter = new BloomFilter(Math.Max(songKeys.Count, 100), 0.01);
+            _libraryFilter.AddRange(songKeys);
+            _librarySongCount = songKeys.Count;
+
+            // 序列化并发布到 DHT
+            var filterData = _libraryFilter.Export();
+            var payload = JsonSerializer.Serialize(new LibraryIndexPayload
+            {
+                NodeId = _routing.LocalId.ToString(),
+                SongCount = songKeys.Count,
+                Filter = filterData,
+                Timestamp = DateTime.UtcNow
+            }, _jsonOpts);
+
+            var key = $"library:{_routing.LocalId}";
+            await StoreAsync(key, payload);
+
+            _lastLibraryPublish = DateTime.UtcNow;
+            _logger.LogInformation("曲库索引已发布: {Count} 首歌曲, Bloom Filter {Size} bytes",
+                songKeys.Count, filterData.Bits.Length);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "曲库索引发布失败");
+        }
+    }
+
+    /// <summary>在 DHT 网络中查找拥有指定歌曲的节点</summary>
+    public async Task<List<SongHolder>> FindSongHoldersAsync(string songKey)
+    {
+        var holders = new List<SongHolder>();
+        var normalizedKey = songKey.ToLowerInvariant();
+
+        // 查找所有已知的 library:* 键
+        foreach (var node in _routing.GetAllNodes())
+        {
+            var key = $"library:{node.Id}";
+            var value = _store.Get(key);
+            if (value == null)
+            {
+                // 尝试从 DHT 网络获取
+                value = await FindValueAsync(key);
+            }
+
+            if (value == null) continue;
+
+            try
+            {
+                var payload = JsonSerializer.Deserialize<LibraryIndexPayload>(value, _jsonOpts);
+                if (payload?.Filter == null) continue;
+
+                var filter = BloomFilter.Import(payload.Filter);
+                if (filter.Contains(normalizedKey))
+                {
+                    holders.Add(new SongHolder
+                    {
+                        NodeId = payload.NodeId,
+                        Address = node.Endpoint.ToString(),
+                        SongCount = payload.SongCount,
+                        Timestamp = payload.Timestamp,
+                        IsExact = false // Bloom Filter 有误判可能
+                    });
+                }
+            }
+            catch { /* 忽略解析错误 */ }
+        }
+
+        return holders;
     }
 
     private string NewRpcId() => Guid.NewGuid().ToString("N")[..16];
@@ -395,6 +506,32 @@ public class DhtService : IDisposable
         Stop();
         _cts?.Dispose();
     }
+}
+
+// ── 曲库索引模型 ──
+
+public class LibraryIndexPayload
+{
+    [JsonPropertyName("nodeId")]
+    public string NodeId { get; set; } = "";
+
+    [JsonPropertyName("songCount")]
+    public int SongCount { get; set; }
+
+    [JsonPropertyName("filter")]
+    public BloomFilterData? Filter { get; set; }
+
+    [JsonPropertyName("timestamp")]
+    public DateTime Timestamp { get; set; }
+}
+
+public class SongHolder
+{
+    public string NodeId { get; set; } = "";
+    public string Address { get; set; } = "";
+    public int SongCount { get; set; }
+    public DateTime Timestamp { get; set; }
+    public bool IsExact { get; set; }
 }
 
 // ── 配置 ──

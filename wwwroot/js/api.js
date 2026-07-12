@@ -204,9 +204,19 @@ class ApiClient {
   async getSongs(params) { return this.get('/songs', params); }
   async getSong(id) { return this.get(`/songs/${id}`); }
   async getRandomSongs(count) { return this.get('/songs/random', { count }); }
-  getStreamUrl(id) { return `${API_BASE}/songs/${id}/stream`; }
-  getHlsUrl(id) { return `${API_BASE}/hls/${id}/master.m3u8`; }
-  getCoverUrl(id, size) { return `${API_BASE}/songs/${id}/cover${size ? '?size=' + size : ''}`; }
+  // 媒体端点（audio/img/hls 无法设置 Authorization 头）通过 access_token 查询参数鉴权
+  _withToken(url) {
+    if (!this.accessToken) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}access_token=${encodeURIComponent(this.accessToken)}`;
+  }
+  getStreamUrl(id) { return this._withToken(`${API_BASE}/songs/${id}/stream`); }
+  getHlsUrl(id) { return this._withToken(`${API_BASE}/hls/${id}/master.m3u8`); }
+  getCoverUrl(id, size) {
+    let url = `${API_BASE}/songs/${id}/cover`;
+    if (size) url += `?size=${size}`;
+    return this._withToken(url);
+  }
   async getLyrics(id) { return this.get(`/songs/${id}/lyrics`); }
 
   // ── Artists ──

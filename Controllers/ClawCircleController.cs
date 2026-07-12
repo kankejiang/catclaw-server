@@ -104,8 +104,42 @@ public class ClawCircleController : ControllerBase
     [HttpGet("transfers")]
     public IActionResult Transfers()
     {
-        // Return summary (no detailed file paths exposed)
         return Ok(new { message = "Transfer engine active" });
+    }
+
+    [HttpGet("library/status")]
+    public IActionResult LibraryStatus()
+    {
+        return Ok(new
+        {
+            songCount = _dht.LibrarySongCount,
+            lastPublish = _dht.LastLibraryPublish,
+            dhtStoreCount = _dht.StoreCount
+        });
+    }
+
+    [HttpGet("find-song")]
+    public async Task<IActionResult> FindSong([FromQuery] string artist, [FromQuery] string title)
+    {
+        if (string.IsNullOrEmpty(artist) || string.IsNullOrEmpty(title))
+            return BadRequest("需要 artist 和 title 参数");
+
+        var songKey = (artist + "\x01" + title).ToLowerInvariant();
+        var holders = await _dht.FindSongHoldersAsync(songKey);
+
+        return Ok(new
+        {
+            query = $"{artist} - {title}",
+            holders = holders.Select(h => new
+            {
+                nodeId = h.NodeId[..Math.Min(16, h.NodeId.Length)] + "...",
+                address = h.Address,
+                songCount = h.SongCount,
+                timestamp = h.Timestamp,
+                isExact = h.IsExact
+            }).ToList(),
+            totalHolders = holders.Count
+        });
     }
 
     [HttpPost("dht/toggle")]
