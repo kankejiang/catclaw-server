@@ -14,31 +14,27 @@ P2P 音乐流媒体服务器，使用 C# + ASP.NET Core + SQLite 重写版。
 
 ## 快速开始
 
-### 1. 用 Visual Studio 打开
-双击 `CatClawMusicServer.csproj` 或用 VS → "打开项目"
+### 🚀 一键部署（推荐）
 
-### 2. 还原 NuGet 包
-VS 会自动还原，或手动：
 ```bash
-dotnet restore
+# 国内 Gitee 镜像（推荐）
+curl -fsSL https://gitee.com/kankejiang/catclaw-server/raw/main/install_gitee.sh | sudo bash
+
+# GitHub（海外用户）
+curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/main/install.sh | sudo bash
 ```
 
-### 3. 配置音乐目录
-编辑 `appsettings.json`：
-```json
-{
-  "MusicServer": {
-    "MusicDirectory": "D:\\YourMusicFolder",
-    "CoverOutputDir": "Data\\covers"
-  }
-}
+脚本会自动安装 Docker、克隆源码、构建镜像、交互式配置端口/令牌/音乐目录，完成后输出访问地址。
+
+### 🔑 首次使用
+
+浏览器打开 `http://NAS_IP:37823` → 自动进入注册页 → 创建管理员 → 登录。
+
+忘记密码时在 NAS 上执行：
+```bash
+docker exec -it catclaw-server dotnet CatClawMusicServer.dll claw reset
+docker compose -f /opt/catclaw-server/docker-compose.yml restart
 ```
-
-### 4. 运行
-按 F5 或 `dotnet run`
-
-访问 `http://localhost:37823` 查看 Web UI
-访问 `http://localhost:37823/swagger` 查看 API 文档
 
 ## API 端点
 
