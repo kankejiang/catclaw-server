@@ -78,7 +78,7 @@ services:
       - MusicServer__CoverOutputDir=/data/covers
       - MusicServer__AccessToken=${ACCESS_TOKEN}
       - MusicServer__AdminUser=admin
-      - MusicServer__AdminPassword=
+      - MusicServer__AdminPassword=""
       - ASPNETCORE_URLS=http://0.0.0.0:${PORT}
     volumes:
       - ${MUSIC_DIR}:/music
