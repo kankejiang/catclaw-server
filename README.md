@@ -18,7 +18,7 @@ P2P 音乐流媒体服务器，使用 C# + ASP.NET Core + SQLite 重写版。
 
 ```bash
 # 国内 Gitee 镜像（推荐）
-curl -fsSL https://gitee.com/kankejiang/catclaw-server/raw/main/install_gitee.sh | sudo bash
+curl -fsSL https://gitee.com/kankejiang/catclaw-server/raw/master/install_gitee.sh | sudo bash
 
 # GitHub（海外用户）
 curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/main/install.sh | sudo bash
@@ -110,7 +110,7 @@ CatClawMusicServer.exe claw reset
 
 ```bash
 # 国内 Gitee 镜像（推荐）
-curl -fsSL https://gitee.com/kankejiang/catclaw-server/raw/main/install_gitee.sh | sudo bash
+curl -fsSL https://gitee.com/kankejiang/catclaw-server/raw/master/install_gitee.sh | sudo bash
 
 # GitHub（海外用户）
 curl -fsSL https://raw.githubusercontent.com/kankejiang/catclaw-server/main/install.sh | sudo bash
