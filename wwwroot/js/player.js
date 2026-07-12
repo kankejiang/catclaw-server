@@ -68,7 +68,14 @@ class AudioPlayer {
       this.hls = new Hls({
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
-        enableWorker: true
+        enableWorker: true,
+        // 为所有 HLS 子请求（index.m3u8 + 分片）附加 JWT 头，
+        // 避免 401 导致分片加载失败。
+        xhrSetup: (xhr) => {
+          if (api.accessToken) {
+            xhr.setRequestHeader('Authorization', `Bearer ${api.accessToken}`);
+          }
+        }
       });
       this.hls.loadSource(api.getHlsUrl(song.id));
       this.hls.attachMedia(this.audio);

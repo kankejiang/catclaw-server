@@ -75,7 +75,12 @@ var bootstrapStr = dhtSection["BootstrapNodes"];
 if (!string.IsNullOrEmpty(bootstrapStr))
     dhtOpts.BootstrapNodes = bootstrapStr.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
 builder.Services.AddSingleton(dhtOpts);
-builder.Services.AddSingleton<DhtService>();
+builder.Services.AddSingleton<DhtService>(sp =>
+    new DhtService(
+        sp.GetRequiredService<DhtOptions>(),
+        sp.GetRequiredService<ILogger<DhtService>>(),
+        sp.GetRequiredService<ILogger<RoutingTable>>(),
+        sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>()));
 
 // ── JWT 认证配置 ──
 var jwtSection = builder.Configuration.GetSection("Jwt");
@@ -130,6 +135,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = jwtAudience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecretKey)),
             ClockSkew = TimeSpan.FromMinutes(1)
+        };
+        // 允许媒体端点（音频流/HLS/封面）通过查询参数 access_token 携带 JWT，
+        // 因为 <audio src> / <img src> / HLS.js 默认无法设置 Authorization 头。
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var path = context.HttpContext.Request.Path.Value ?? "";
+                if (path.StartsWith("/api/v1/songs", StringComparison.OrdinalIgnoreCase) ||
+                    path.StartsWith("/api/v1/hls", StringComparison.OrdinalIgnoreCase))
+                {
+                    var token = context.Request.Query["access_token"].ToString();
+                    if (!string.IsNullOrEmpty(token))
+                        context.Token = token;
+                }
+                return Task.CompletedTask;
+            }
         };
     });
 builder.Services.AddAuthorization();
