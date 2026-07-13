@@ -24,9 +24,11 @@ public class ApiAuthMiddleware
         var path = context.Request.Path.Value ?? "";
 
         // /api/auth/* 和 /api/v1/auth/* 为公共端点（注册/登录/登出/状态），不校验 AccessToken
+        // /api/clawcircle/account/* 为猫爪驿站账号端点（自带 token 参数鉴权，允许匿名访问）
         // /api/config + /api/scan/status 为设置页展示用，无需鉴权
         if (path.StartsWith("/api/auth", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/v1/auth", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/clawcircle/account/", StringComparison.OrdinalIgnoreCase) ||
             path.Equals("/api/config", StringComparison.OrdinalIgnoreCase) ||
             path.Equals("/api/scan/status", StringComparison.OrdinalIgnoreCase))
         {
