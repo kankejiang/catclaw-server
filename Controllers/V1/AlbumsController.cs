@@ -1,5 +1,6 @@
 using CatClawMusicServer.Data;
 using CatClawMusicServer.Models;
+using CatClawMusicServer.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,8 +13,13 @@ namespace CatClawMusicServer.Controllers.V1;
 public class AlbumsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
+    private readonly CoverService _cover;
 
-    public AlbumsController(ApplicationDbContext db) => _db = db;
+    public AlbumsController(ApplicationDbContext db, CoverService cover)
+    {
+        _db = db;
+        _cover = cover;
+    }
 
     // GET /api/v1/albums?page=1&page_size=50&artist_id=&sort=
     [HttpGet]
@@ -126,5 +132,30 @@ public class AlbumsController : ControllerBase
             .ToListAsync();
 
         return Ok(ApiResponse<object>.Ok(new { items = songs }));
+    }
+
+    // GET /api/v1/albums/{id}/cover?size=small|medium|large|original
+    [HttpGet("{id}/cover")]
+    public async Task<IActionResult> GetCover(long id, [FromQuery] string? size = null)
+    {
+        var album = await _db.Albums.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
+        if (album == null)
+            return Ok(ApiResponse<object>.Error(ErrorCodes.NotFound, "专辑不存在"));
+
+        var coverPath = _cover.GetCoverPath(album.Cover, size ?? "original");
+        if (coverPath == null || !System.IO.File.Exists(coverPath))
+            return NotFound();
+
+        var ext = Path.GetExtension(coverPath).ToLowerInvariant();
+        var ct = ext switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            _ => "application/octet-stream"
+        };
+
+        return PhysicalFile(coverPath, ct);
     }
 }
