@@ -51,14 +51,16 @@ public class BlockchainLedger
 
     private readonly List<Block> _chain = new();
     private readonly ConcurrentQueue<Transaction> _pending = new();
-    private readonly ConcurrentDictionary<string, long> _balances = new();
-    private readonly ConcurrentDictionary<string, DateTime> _lastRewardTime = new(); // 节点 → 上次在线奖励时间
+    private readonly ConcurrentDictionary<string, long> _balances = new(); // accountKey → 余额
+    private readonly ConcurrentDictionary<string, DateTime> _lastRewardTime = new(); // accountKey → 上次在线奖励时间
+    private readonly ConcurrentDictionary<string, string> _deviceToAccount = new(); // deviceId → accountKey 缓存
     private readonly object _blockLock = new();
     private readonly ILogger<BlockchainLedger> _logger;
     private Timer? _mineTimer;
     private Timer? _pruneTimer;
     private Timer? _onlineRewardTimer;
     private Func<List<(string deviceId, DateTime connectedAt)>>? _getOnlineNodes;
+    private Func<string, Task<long?>>? _resolveDeviceToAccount; // deviceId → accountId 查询（由 AccountService 注入）
 
     /// <summary>已修剪到的块索引（此索引之前的普通块已删除，仅保留快照）。</summary>
     public int PrunedToIndex { get; private set; }
@@ -88,6 +90,29 @@ public class BlockchainLedger
     /// <summary>注入在线节点查询委托（由 Tracker 提供，避免循环依赖）。</summary>
     public void SetOnlineNodesProvider(Func<List<(string deviceId, DateTime connectedAt)>> provider)
         => _getOnlineNodes = provider;
+
+    /// <summary>注入 deviceId → accountId 查询委托（由 AccountService 提供）。</summary>
+    public void SetDeviceAccountResolver(Func<string, Task<long?>> resolver)
+        => _resolveDeviceToAccount = resolver;
+
+    /// <summary>accountId → 账本内部 key。</summary>
+    private static string AccountKey(long accountId) => $"acc:{accountId}";
+
+    /// <summary>注册账号到账本（赠送初始小鱼干）。</summary>
+    public void RegisterAccount(long accountId)
+    {
+        var key = AccountKey(accountId);
+        _balances.GetOrAdd(key, _ => InitialBalance);
+        _lastRewardTime.GetOrAdd(key, _ => DateTime.UtcNow);
+    }
+
+    /// <summary>关联 deviceId 到 accountId（缓存，供传输记账和在线奖励使用）。</summary>
+    public void BindDeviceToAccount(string deviceId, long accountId)
+    {
+        _deviceToAccount[deviceId] = AccountKey(accountId);
+        // 同步注册账号（若尚未注册）
+        RegisterAccount(accountId);
+    }
 
     public void Start()
     {
@@ -129,19 +154,41 @@ public class BlockchainLedger
         }
     }
 
-    public long GetBalance(string deviceId)
-        => _balances.TryGetValue(deviceId, out var b) ? b : 0;
+    /// <summary>查询账号余额（传入 accountId）。</summary>
+    public long GetBalance(long accountId)
+        => _balances.TryGetValue(AccountKey(accountId), out var b) ? b : 0;
+
+    /// <summary>查询设备关联账号的余额（异步，需查 AccountService）。</summary>
+    public async Task<long> GetBalanceByDeviceAsync(string deviceId)
+    {
+        // 优先查缓存
+        if (_deviceToAccount.TryGetValue(deviceId, out var key))
+            return _balances.TryGetValue(key, out var b) ? b : 0;
+        // 回源查 AccountService
+        if (_resolveDeviceToAccount != null)
+        {
+            var accId = await _resolveDeviceToAccount(deviceId);
+            if (accId.HasValue)
+            {
+                BindDeviceToAccount(deviceId, accId.Value);
+                return GetBalance(accId.Value);
+            }
+        }
+        return 0;
+    }
 
     public IReadOnlyDictionary<string, long> AllBalances() => _balances;
 
+    /// <summary>注册设备到账本（兼容旧接口，内部关联到账号）。</summary>
     public void RegisterNode(string deviceId)
     {
+        // 旧接口兼容：若无账号关联，暂用 deviceId 作为 key（待 BindDeviceToAccount 后迁移）
         _balances.GetOrAdd(deviceId, _ => InitialBalance);
-        // 记录注册时间为在线奖励起始时间
         _lastRewardTime.GetOrAdd(deviceId, _ => DateTime.UtcNow);
     }
 
-    /// <summary>在线奖励：每分钟为在线节点发小鱼干（1h=10🐟 → 1min=10/60🐟，用毫秒精度累计）。</summary>
+    /// <summary>在线奖励：每分钟为在线节点发小鱼干（1h=10🐟 → 1min=10/60🐟，用毫秒精度累计）。
+    /// 奖励发到 deviceId 关联的账号（跨设备共享积分）。</summary>
     private void RewardOnlineNodes()
     {
         if (_getOnlineNodes == null) return;
@@ -151,7 +198,14 @@ public class BlockchainLedger
             var onlineNodes = _getOnlineNodes();
             foreach (var (deviceId, connectedAt) in onlineNodes)
             {
-                var last = _lastRewardTime.GetOrAdd(deviceId, _ => connectedAt);
+                // 解析 deviceId → accountKey（优先用缓存，未命中则跳过等下次异步解析）
+                if (!_deviceToAccount.TryGetValue(deviceId, out var key))
+                {
+                    // 旧式未绑定账号的设备，用 deviceId 作为 key
+                    key = deviceId;
+                }
+
+                var last = _lastRewardTime.GetOrAdd(key, _ => connectedAt);
                 var elapsed = now - last;
                 if (elapsed < OnlineRewardInterval) continue;
 
@@ -163,7 +217,7 @@ public class BlockchainLedger
                 {
                     Type = TxType.Reward,
                     From = "SYSTEM",
-                    To = deviceId,
+                    To = key,
                     Amount = fish,
                     FileId = "",
                     Bytes = 0,
@@ -171,7 +225,7 @@ public class BlockchainLedger
                     Remark = $"在线奖励 {elapsed.TotalMinutes:F0} 分钟"
                 });
 
-                _lastRewardTime[deviceId] = now;
+                _lastRewardTime[key] = now;
             }
         }
         catch (Exception ex)
@@ -180,37 +234,48 @@ public class BlockchainLedger
         }
     }
 
-    public void RecordUpload(string uploader, string downloader, long bytes, string fileId)
+    public void RecordUpload(string uploaderDeviceId, string downloaderDeviceId, long bytes, string fileId)
     {
         var fish = BytesToFish(bytes);
+        var uploaderKey = ResolveDeviceKey(uploaderDeviceId);
+        var downloaderShort = ShortId(downloaderDeviceId);
         _pending.Enqueue(new Transaction
         {
             Type = TxType.Upload,
             From = "SYSTEM",
-            To = uploader,
+            To = uploaderKey,
             Amount = fish,
             FileId = fileId,
             Bytes = bytes,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            Remark = $"上传 {FormatBytes(bytes)} 给 {(downloader.Length > 12 ? downloader[..12] + "..." : downloader)}"
+            Remark = $"上传 {FormatBytes(bytes)} 给 {downloaderShort}"
         });
     }
 
-    public void RecordDownload(string downloader, string uploader, long bytes, string fileId)
+    public void RecordDownload(string downloaderDeviceId, string uploaderDeviceId, long bytes, string fileId)
     {
         var fish = BytesToFish(bytes);
+        var downloaderKey = ResolveDeviceKey(downloaderDeviceId);
+        var uploaderShort = ShortId(uploaderDeviceId);
         _pending.Enqueue(new Transaction
         {
             Type = TxType.Download,
-            From = downloader,
+            From = downloaderKey,
             To = "SYSTEM",
             Amount = fish,
             FileId = fileId,
             Bytes = bytes,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            Remark = $"从 {(uploader.Length > 12 ? uploader[..12] + "..." : uploader)} 下载 {FormatBytes(bytes)}"
+            Remark = $"从 {uploaderShort} 下载 {FormatBytes(bytes)}"
         });
     }
+
+    /// <summary>deviceId → 账本 key（已绑定账号返回 accountKey，否则返回 deviceId）。</summary>
+    private string ResolveDeviceKey(string deviceId)
+        => _deviceToAccount.TryGetValue(deviceId, out var key) ? key : deviceId;
+
+    private static string ShortId(string id)
+        => id.Length > 12 ? id[..12] + "..." : id;
 
     /// <summary>字节 → 小鱼干换算：1 GB = 10 🐟，不足 1GB 按 1GB 算（最低 1 🐟）。</summary>
     private static int BytesToFish(long bytes)
@@ -229,16 +294,34 @@ public class BlockchainLedger
         return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
     }
 
-    /// <summary>查询指定节点的交易历史（仅快照后的区块）。</summary>
-    public List<Transaction> GetHistory(string deviceId)
+    /// <summary>查询指定账号的交易历史（仅快照后的区块）。</summary>
+    public List<Transaction> GetHistory(long accountId)
     {
+        var key = AccountKey(accountId);
         var list = new List<Transaction>();
         foreach (var block in _chain)
         {
             if (block.IsSnapshot) continue; // 快照块无交易明细
             foreach (var tx in block.Transactions)
             {
-                if (tx.From == deviceId || tx.To == deviceId)
+                if (tx.From == key || tx.To == key)
+                    list.Add(tx);
+            }
+        }
+        return list;
+    }
+
+    /// <summary>查询指定设备的交易历史（兼容旧接口，内部转换到账号）。</summary>
+    public List<Transaction> GetHistoryByDevice(string deviceId)
+    {
+        var key = _deviceToAccount.TryGetValue(deviceId, out var k) ? k : deviceId;
+        var list = new List<Transaction>();
+        foreach (var block in _chain)
+        {
+            if (block.IsSnapshot) continue;
+            foreach (var tx in block.Transactions)
+            {
+                if (tx.From == key || tx.To == key)
                     list.Add(tx);
             }
         }

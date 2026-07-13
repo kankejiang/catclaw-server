@@ -371,6 +371,53 @@ class ApiClient {
     return this._getRaw(`/api/clawcircle/ledger/history/${encodeURIComponent(deviceId)}`);
   }
 
+  // ── 猫爪驿站账号 ──
+  async registerAccount(username, password, displayName) {
+    const res = await this._fetch('/api/clawcircle/account/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, displayName: displayName || null })
+    });
+    return res.ok ? await res.json() : { error: await res.text() };
+  }
+
+  async loginAccount(username, password, deviceId, deviceName) {
+    const res = await this._fetch('/api/clawcircle/account/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, deviceId, deviceName: deviceName || null })
+    });
+    return res.ok ? await res.json() : { error: await res.text() };
+  }
+
+  async getMe(token) {
+    return this._getRaw(`/api/clawcircle/account/me?token=${encodeURIComponent(token)}`);
+  }
+
+  async listDevices(token) {
+    return this._getRaw(`/api/clawcircle/account/devices?token=${encodeURIComponent(token)}`);
+  }
+
+  async revokeDevice(token, deviceId) {
+    const res = await this._fetch(`/api/clawcircle/account/devices/${encodeURIComponent(deviceId)}?token=${encodeURIComponent(token)}`, {
+      method: 'DELETE'
+    });
+    return res.ok ? await res.json() : { error: await res.text() };
+  }
+
+  async changePassword(token, oldPassword, newPassword) {
+    const res = await this._fetch('/api/clawcircle/account/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, oldPassword, newPassword })
+    });
+    return res.ok ? await res.json() : { error: await res.text() };
+  }
+
+  async getBalanceByAccount(accountId) {
+    return this._getRaw(`/api/clawcircle/ledger/balance?accountId=${accountId}`);
+  }
+
   // Raw GET without /api/v1 prefix
   async _getRaw(path) {
     const res = await this._fetch(path);
