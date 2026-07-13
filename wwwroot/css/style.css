@@ -1264,3 +1264,14 @@ body {
     right: -100%;
   }
 }
+
+/* ── 密码字段 ──
+   用 type="text" + text-security 替代 type="password"，
+   以支持中文输入法（type="password" 会禁用 IME）。
+   Chrome/Edge/Safari/移动端通过 -webkit-text-security 显示圆点遮罩；
+   Firefox 不支持 text-security，退化为明文显示（本地管理界面可接受）。 */
+.pwd-field {
+  -webkit-text-security: disc;
+  -moz-text-security: disc;
+  text-security: disc;
+}

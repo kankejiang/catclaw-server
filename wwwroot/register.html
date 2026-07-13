@@ -44,6 +44,8 @@ body {
 .msg.ok { color:#0f6; }
 .login-link { text-align:center; margin-top:16px; font-size:13px; color:#888; }
 .login-link a { color:#00d4ff; text-decoration:none; }
+/* 密码字段用 text-security 替代 type="password"，支持中文输入法 */
+.pwd-field { -webkit-text-security: disc; -moz-text-security: disc; text-security: disc; }
 </style>
 </head>
 <body>
@@ -56,11 +58,11 @@ body {
     </div>
     <div class="field">
         <label>密码</label>
-        <input type="password" id="password" placeholder="至少 4 个字符" autocomplete="new-password">
+        <input type="text" class="pwd-field" id="password" placeholder="至少 4 个字符（支持中文）" autocomplete="new-password">
     </div>
     <div class="field">
         <label>确认密码</label>
-        <input type="password" id="password2" placeholder="再次输入密码" autocomplete="new-password">
+        <input type="text" class="pwd-field" id="password2" placeholder="再次输入密码" autocomplete="new-password">
     </div>
     <button class="btn" onclick="doRegister()">创 建 管 理 员</button>
     <div class="msg" id="msg"></div>
