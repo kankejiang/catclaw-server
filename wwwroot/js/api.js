@@ -372,46 +372,54 @@ class ApiClient {
   }
 
   // ── 猫爪驿站账号 ──
-  async registerAccount(username, password, displayName) {
-    const res = await this._fetch('/api/clawcircle/account/register', {
+  // 注意：账号端点使用原生 fetch，绕过 _fetch 的 JWT 注入和 401 重试逻辑。
+  // 原因：_fetch 在 JWT 过期时会触发 401 重试，重试过程中可能导致 body 丢失，
+  // 导致服务端收到空 body 返回 400 验证错误。账号端点自带 token 参数鉴权，不需要 JWT。
+  async _clawPost(path, body) {
+    const res = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, displayName: displayName || null })
+      body: JSON.stringify(body)
     });
     return res.ok ? await res.json() : { error: await res.text() };
+  }
+
+  async _clawDelete(path) {
+    const res = await fetch(path, { method: 'DELETE' });
+    return res.ok ? await res.json() : { error: await res.text() };
+  }
+
+  async _clawGet(path) {
+    const res = await fetch(path);
+    if (!res.ok) return null;
+    try { return await res.json(); } catch { return null; }
+  }
+
+  async registerAccount(username, password, displayName) {
+    return this._clawPost('/api/clawcircle/account/register',
+      { username, password, displayName: displayName || null });
   }
 
   async loginAccount(username, password, deviceId, deviceName) {
-    const res = await this._fetch('/api/clawcircle/account/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, deviceId, deviceName: deviceName || null })
-    });
-    return res.ok ? await res.json() : { error: await res.text() };
+    return this._clawPost('/api/clawcircle/account/login',
+      { username, password, deviceId, deviceName: deviceName || null });
   }
 
   async getClawMe(token) {
-    return this._getRaw(`/api/clawcircle/account/me?token=${encodeURIComponent(token)}`);
+    return this._clawGet(`/api/clawcircle/account/me?token=${encodeURIComponent(token)}`);
   }
 
   async listDevices(token) {
-    return this._getRaw(`/api/clawcircle/account/devices?token=${encodeURIComponent(token)}`);
+    return this._clawGet(`/api/clawcircle/account/devices?token=${encodeURIComponent(token)}`);
   }
 
   async revokeDevice(token, deviceId) {
-    const res = await this._fetch(`/api/clawcircle/account/devices/${encodeURIComponent(deviceId)}?token=${encodeURIComponent(token)}`, {
-      method: 'DELETE'
-    });
-    return res.ok ? await res.json() : { error: await res.text() };
+    return this._clawDelete(`/api/clawcircle/account/devices/${encodeURIComponent(deviceId)}?token=${encodeURIComponent(token)}`);
   }
 
   async changePassword(token, oldPassword, newPassword) {
-    const res = await this._fetch('/api/clawcircle/account/change-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, oldPassword, newPassword })
-    });
-    return res.ok ? await res.json() : { error: await res.text() };
+    return this._clawPost('/api/clawcircle/account/change-password',
+      { token, oldPassword, newPassword });
   }
 
   async getBalanceByAccount(accountId) {
