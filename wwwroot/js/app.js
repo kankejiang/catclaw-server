@@ -1126,7 +1126,7 @@ const P2PView = {
     const dhtNodes = ref([]);
     const reputation = ref([]);
     const loading = ref(true);
-    const activeTab = ref('overview');
+    const activeTab = ref('dht');  // 默认打开 DHT 引导页
     const dhtEnabled = ref(false);
     const bootstrapAddr = ref('');
     const toggling = ref(false);
@@ -1507,20 +1507,29 @@ const P2PView = {
       </div>
 
       <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+        <button class="btn" :class="activeTab === 'dht' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'dht'">🌐 DHT 网络 <span v-if="dhtEnabled" style="color:var(--success);">✓</span></button>
+        <button class="btn" :class="activeTab === 'account' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'account'">👤 账号 <span v-if="clawToken" style="color:var(--success);">✓</span></button>
         <button class="btn" :class="activeTab === 'overview' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'overview'">概览</button>
-        <button class="btn" :class="activeTab === 'peers' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'peers'">在线节点</button>
-        <button class="btn" :class="activeTab === 'dht' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'dht'">DHT 网络</button>
-        <button class="btn" :class="activeTab === 'reputation' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'reputation'">节点信誉</button>
-        <button class="btn" :class="activeTab === 'search' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'search'">🔍 找歌</button>
-        <button class="btn" :class="activeTab === 'transfers' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'transfers'">📦 传输 <span v-if="transfers.length" style="margin-left:4px;opacity:.8;">({{ transfers.length }})</span></button>
-        <button class="btn" :class="activeTab === 'ledger' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'ledger'">🐟 小鱼干</button>
-        <button class="btn" :class="activeTab === 'account' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'account'">👤 账号</button>
+        <button class="btn" :class="activeTab === 'peers' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'peers'" :disabled="!dhtEnabled">在线节点</button>
+        <button class="btn" :class="activeTab === 'reputation' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'reputation'" :disabled="!dhtEnabled">节点信誉</button>
+        <button class="btn" :class="activeTab === 'search' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'search'" :disabled="!dhtEnabled">🔍 找歌</button>
+        <button class="btn" :class="activeTab === 'transfers' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'transfers'" :disabled="!dhtEnabled">📦 传输 <span v-if="transfers.length" style="margin-left:4px;opacity:.8;">({{ transfers.length }})</span></button>
+        <button class="btn" :class="activeTab === 'ledger' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'ledger'" :disabled="!dhtEnabled">🐟 小鱼干</button>
       </div>
 
       <div v-if="loading" class="loading"><div class="loading-spinner"></div></div>
 
       <!-- 概览 -->
       <div v-if="!loading && activeTab === 'overview'">
+        <!-- DHT 未开启醒目提示 -->
+        <div v-if="!dhtEnabled" style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:10px;padding:16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">
+          <span style="font-size:24px;">🌐</span>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:600;color:var(--accent);">DHT 未启用</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">猫爪驿站的核心功能依赖 DHT 网络，请先启用</div>
+          </div>
+          <button class="btn btn-primary" @click="activeTab = 'dht'">前往启用</button>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:24px;">
           <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:20px;">
             <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">WebSocket 节点</div>
@@ -1572,6 +1581,45 @@ const P2PView = {
 
       <!-- DHT 网络 -->
       <div v-if="!loading && activeTab === 'dht'">
+        <!-- 引导步骤说明 -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--accent);border-radius:10px;padding:20px;margin-bottom:16px;">
+          <h3 style="font-size:16px;font-weight:600;margin-bottom:12px;">🐾 猫爪驿站使用指南</h3>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;align-items:flex-start;gap:10px;">
+              <span style="width:24px;height:24px;border-radius:50%;background:var(--accent-dim);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">1</span>
+              <div style="font-size:13px;line-height:1.5;">
+                <strong>开启 Kademlia DHT</strong>
+                <span style="color:var(--text-muted);"> — 去中心化节点发现的基础，未开启时其他功能不可用</span>
+                <span v-if="dhtEnabled" style="color:var(--success);margin-left:6px;">✓ 已完成</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px;">
+              <span :style="{ width:'24px',height:'24px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:'700',flexShrink:'0', background: dhtEnabled ? 'var(--accent-dim)' : 'var(--bg-tertiary)', color: dhtEnabled ? 'var(--accent)' : 'var(--text-muted)' }">2</span>
+              <div style="font-size:13px;line-height:1.5;" :style="{ color: dhtEnabled ? 'inherit' : 'var(--text-muted)' }">
+                <strong>连接 Bootstrap 节点</strong>
+                <span style="color:var(--text-muted);"> — 输入其他猫爪驿站服务器的地址，加入 P2P 网络</span>
+                <span v-if="dhtNodes.length" style="color:var(--success);margin-left:6px;">✓ 已连接 {{ dhtNodes.length }} 个节点</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px;">
+              <span :style="{ width:'24px',height:'24px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:'700',flexShrink:'0', background: dhtEnabled ? 'var(--accent-dim)' : 'var(--bg-tertiary)', color: dhtEnabled ? 'var(--accent)' : 'var(--text-muted)' }">3</span>
+              <div style="font-size:13px;line-height:1.5;" :style="{ color: dhtEnabled ? 'inherit' : 'var(--text-muted)' }">
+                <strong>注册/登录猫爪驿站账号</strong>
+                <span style="color:var(--text-muted);"> — 记录小鱼干积分，支持跨设备同时挂机</span>
+                <span v-if="clawToken" style="color:var(--success);margin-left:6px;">✓ 已登录</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px;">
+              <span :style="{ width:'24px',height:'24px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:'700',flexShrink:'0', background: (dhtEnabled && clawToken) ? 'var(--accent-dim)' : 'var(--bg-tertiary)', color: (dhtEnabled && clawToken) ? 'var(--accent)' : 'var(--text-muted)' }">4</span>
+              <div style="font-size:13px;line-height:1.5;" :style="{ color: (dhtEnabled && clawToken) ? 'inherit' : 'var(--text-muted)' }">
+                <strong>开始找歌、分享、赚取小鱼干</strong>
+                <span style="color:var(--text-muted);"> — 在线 1 小时奖励 10🐟，上传 1GB 奖励 10🐟</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DHT 开关 -->
         <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
             <div>
@@ -1591,10 +1639,11 @@ const P2PView = {
           </div>
         </div>
 
+        <!-- DHT 节点列表 -->
         <div v-if="!dhtEnabled" class="empty-state">
           <div class="empty-state-icon">🌐</div>
           <p class="empty-state-text">DHT 未启用</p>
-          <p class="empty-state-hint">点击上方按钮启用去中心化节点发现</p>
+          <p class="empty-state-hint">点击上方按钮启用去中心化节点发现<br/>开启后才能注册账号、找歌、赚取小鱼干</p>
         </div>
         <div v-else-if="!dhtNodes.length" class="empty-state">
           <div class="empty-state-icon">🔍</div>
@@ -1821,8 +1870,15 @@ const P2PView = {
 
       <!-- 账号 -->
       <div v-if="!loading && activeTab === 'account'">
+        <!-- DHT 未开启提示 -->
+        <div v-if="!dhtEnabled" class="empty-state">
+          <div class="empty-state-icon">🌐</div>
+          <p class="empty-state-text">需先开启 DHT</p>
+          <p class="empty-state-hint">猫爪驿站账号依赖 P2P 网络，请先到「DHT 网络」tab 启用</p>
+          <button class="btn btn-primary" style="margin-top:12px;" @click="activeTab = 'dht'">前往开启 DHT</button>
+        </div>
         <!-- 未登录：登录/注册切换 -->
-        <div v-if="!clawToken" style="max-width:420px;">
+        <div v-else-if="!clawToken" style="max-width:420px;">
           <div style="display:flex;gap:8px;margin-bottom:20px;">
             <button class="btn" :class="authMode === 'login' ? 'btn-primary' : 'btn-secondary'" style="flex:1;" @click="authMode = 'login'">登录</button>
             <button class="btn" :class="authMode === 'register' ? 'btn-primary' : 'btn-secondary'" style="flex:1;" @click="authMode = 'register'">注册新账号</button>
