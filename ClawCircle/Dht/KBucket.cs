@@ -54,7 +54,7 @@ public class RoutingTable
     {
         var allNodes = _buckets.SelectMany(b => b.GetAll()).ToList();
         return allNodes
-            .OrderBy(n => target.XorDistance(n.Id).CompareTo(NodeId.Random())) // 按 XOR 距离排序
+            .OrderBy(n => target.XorDistance(n.Id)) // 按 XOR 距离升序（值越小越近）
             .Take(count)
             .ToList();
     }

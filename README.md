@@ -163,9 +163,9 @@ docker compose up -d
 
 未安装 Docker 的 Windows 机器可直接使用上面的自包含 EXE。
 
-## 猫爪圈（ClawCircle）P2P 信令（Stage 2）
+## 猫爪驿站（ClawCircle）P2P 信令（Stage 2）
 
-猫爪圈是跨网 P2P 音乐共享功能。服务端在这里扮演 **tracker / 信令中转（WebSocket hub）** 角色：
+猫爪驿站是跨网 P2P 音乐共享功能。服务端在这里扮演 **tracker / 信令中转（WebSocket hub）** 角色：
 维护在线节点注册表、转发 WebRTC 信令（SDP/ICE）、按曲库摘要匹配某首歌的持有者。
 
 ### 连接与鉴权

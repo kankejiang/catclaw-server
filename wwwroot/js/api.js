@@ -329,6 +329,48 @@ class ApiClient {
     return res.ok ? res.json() : null;
   }
 
+  // P2P 传输管理
+  async getTransfers() { return this._getRaw('/api/clawcircle/transfers'); }
+  async getTransfer(taskId) { return this._getRaw(`/api/clawcircle/transfers/${taskId}`); }
+  async cancelTransfer(taskId) {
+    const res = await this._fetch(`/api/clawcircle/transfers/${taskId}/cancel`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }
+    });
+    return res.ok ? res.json() : null;
+  }
+  async offerTransfer(songId, peerDeviceId, taskId = null) {
+    const res = await this._fetch('/api/clawcircle/transfers/offer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ songId: String(songId), peerDeviceId, taskId })
+    });
+    return res.ok ? res.json() : null;
+  }
+  async receiveTransfer(taskId, peerDeviceId, manifest) {
+    const res = await this._fetch('/api/clawcircle/transfers/receive', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskId, peerDeviceId, manifest })
+    });
+    return res.ok ? res.json() : null;
+  }
+  async findSong(artist, title) {
+    return this._getRaw(`/api/clawcircle/find-song?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}`);
+  }
+  async getLibraryStatus() { return this._getRaw('/api/clawcircle/library/status'); }
+  async getDownloadedSongs() { return this._getRaw('/api/v1/songs?source=p2p'); }
+  scanP2PDownloads() { return this.post('/admin/scan/incremental'); }
+
+  // 区块链积分账本
+  async getBalance(deviceId) {
+    return this._getRaw(`/api/clawcircle/ledger/balance?deviceId=${encodeURIComponent(deviceId)}`);
+  }
+  async getAllBalances() { return this._getRaw('/api/clawcircle/ledger/balances'); }
+  async getChain(from = 0, count = 20) {
+    return this._getRaw(`/api/clawcircle/ledger/chain?from=${from}&count=${count}`);
+  }
+  async getHistory(deviceId) {
+    return this._getRaw(`/api/clawcircle/ledger/history/${encodeURIComponent(deviceId)}`);
+  }
+
   // Raw GET without /api/v1 prefix
   async _getRaw(path) {
     const res = await this._fetch(path);

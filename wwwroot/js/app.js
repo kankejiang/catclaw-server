@@ -66,7 +66,7 @@ const AppSidebar = {
           </router-link>
         </div>
         <div class="nav-section">
-          <div class="nav-section-title">猫爪圈</div>
+          <div class="nav-section-title">猫爪驿站</div>
           <router-link to="/p2p" class="nav-item" active-class="active">
             <span class="nav-icon">🐾</span> P2P 网络
           </router-link>
@@ -1117,20 +1117,48 @@ const P2PView = {
     const bootstrapAddr = ref('');
     const toggling = ref(false);
 
+    // 找歌 + 传输管理
+    const transfers = ref([]);
+    const searchArtist = ref('');
+    const searchTitle = ref('');
+    const searchResults = ref(null);
+    const searching = ref(false);
+    const offerSongId = ref('');
+    const offerPeerId = ref('');
+    const offering = ref(false);
+    // 区块链积分账本
+    const balances = ref([]);
+    const chainBlocks = ref([]);
+    const chainHeight = ref(0);
+    const ledgerSize = ref(0);
+    const prunedToIndex = ref(0);
+    const historyDeviceId = ref('');
+    const history = ref(null);
+    let pollTimer = null;
+
     async function load() {
       loading.value = true;
       try {
-        const [s, p, d, r] = await Promise.all([
+        const [s, p, d, r, t, b, c] = await Promise.all([
           api.getP2PStats().catch(() => null),
           api.getP2PPeers().catch(() => ({ peers: [] })),
           api.getDhtNodes().catch(() => ({ nodes: [] })),
-          api.getReputation().catch(() => [])
+          api.getReputation().catch(() => []),
+          api.getTransfers().catch(() => ({ transfers: [] })),
+          api.getAllBalances().catch(() => ({ balances: [] })),
+          api.getChain(0, 10).catch(() => ({ blocks: [], height: 0 }))
         ]);
         stats.value = s;
         dhtEnabled.value = s?.dht?.enabled || false;
         peers.value = p?.peers || [];
         dhtNodes.value = d?.nodes || [];
         reputation.value = Array.isArray(r) ? r : [];
+        transfers.value = t?.transfers || [];
+        balances.value = b?.balances || [];
+        chainBlocks.value = c?.blocks || [];
+        chainHeight.value = c?.height || 0;
+        ledgerSize.value = c?.sizeBytes || 0;
+        prunedToIndex.value = c?.prunedToIndex || 0;
       } catch {}
       loading.value = false;
     }
@@ -1160,22 +1188,110 @@ const P2PView = {
       }
     }
 
-    onMounted(load);
+    async function searchSong() {
+      if (!searchArtist.value.trim() || !searchTitle.value.trim()) return;
+      searching.value = true;
+      try {
+        searchResults.value = await api.findSong(searchArtist.value.trim(), searchTitle.value.trim());
+      } catch (e) {
+        showToast('搜索失败: ' + e.message, 'error');
+      }
+      searching.value = false;
+    }
 
-    return { stats, peers, dhtNodes, reputation, loading, activeTab, dhtEnabled, bootstrapAddr, toggling, toggleDht, doBootstrap };
+    async function doOffer() {
+      if (!offerSongId.value.trim() || !offerPeerId.value) {
+        showToast('请填写歌曲 ID 并选择目标节点', 'error');
+        return;
+      }
+      offering.value = true;
+      try {
+        const r = await api.offerTransfer(offerSongId.value.trim(), offerPeerId.value);
+        if (r && r.taskId) {
+          showToast(`已发起分享，任务 ${r.taskId}`, 'success');
+          offerSongId.value = '';
+          offerPeerId.value = '';
+          await loadTransfers();
+          activeTab.value = 'transfers';
+        } else {
+          showToast('发起失败：节点离线或 STUN 未就绪', 'error');
+        }
+      } catch (e) {
+        showToast('发起失败: ' + e.message, 'error');
+      }
+      offering.value = false;
+    }
+
+    async function loadTransfers() {
+      try {
+        const t = await api.getTransfers();
+        transfers.value = t?.transfers || [];
+      } catch {}
+    }
+
+    async function cancelTask(taskId) {
+      try {
+        await api.cancelTransfer(taskId);
+        showToast('已取消任务', 'success');
+        await loadTransfers();
+      } catch (e) {
+        showToast('取消失败: ' + e.message, 'error');
+      }
+    }
+
+    function formatProgress(p) { return Math.round((p || 0) * 100) + '%'; }
+    function formatSize(bytes) {
+      if (!bytes) return '0 B';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    async function loadHistory() {
+      if (!historyDeviceId.value.trim()) return;
+      try {
+        history.value = await api.getHistory(historyDeviceId.value.trim());
+      } catch (e) {
+        showToast('查询失败: ' + e.message, 'error');
+      }
+    }
+
+    function formatTxType(t) {
+      return t === 'upload' ? '⬆ 上传赚' : t === 'download' ? '⬇ 下载花' : t === 'reward' ? '🎁 在线奖励' : '⚠ 惩罚';
+    }
+    function formatTime(ms) {
+      if (!ms) return '';
+      return new Date(ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+
+    onMounted(() => { load(); pollTimer = setInterval(loadTransfers, 2000); });
+    onUnmounted(() => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } });
+
+    return {
+      stats, peers, dhtNodes, reputation, loading, activeTab,
+      dhtEnabled, bootstrapAddr, toggling, toggleDht, doBootstrap,
+      transfers, searchArtist, searchTitle, searchResults, searching,
+      offerSongId, offerPeerId, offering, searchSong, doOffer, cancelTask,
+      loadTransfers, formatProgress, formatSize,
+      balances, chainBlocks, chainHeight, ledgerSize, prunedToIndex,
+      historyDeviceId, history, loadHistory, formatTxType, formatTime
+    };
   },
   template: `
     <div class="page-content">
       <div class="page-header">
-        <h1 class="page-title">🐾 猫爪圈 P2P</h1>
+        <h1 class="page-title">🐾 猫爪驿站 P2P</h1>
         <p class="page-subtitle">跨节点音乐分享网络</p>
       </div>
 
-      <div style="display:flex;gap:8px;margin-bottom:20px;">
+      <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
         <button class="btn" :class="activeTab === 'overview' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'overview'">概览</button>
         <button class="btn" :class="activeTab === 'peers' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'peers'">在线节点</button>
         <button class="btn" :class="activeTab === 'dht' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'dht'">DHT 网络</button>
         <button class="btn" :class="activeTab === 'reputation' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'reputation'">节点信誉</button>
+        <button class="btn" :class="activeTab === 'search' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'search'">🔍 找歌</button>
+        <button class="btn" :class="activeTab === 'transfers' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'transfers'">📦 传输 <span v-if="transfers.length" style="margin-left:4px;opacity:.8;">({{ transfers.length }})</span></button>
+        <button class="btn" :class="activeTab === 'ledger' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'ledger'">🐟 小鱼干</button>
       </div>
 
       <div v-if="loading" class="loading"><div class="loading-spinner"></div></div>
@@ -1292,6 +1408,194 @@ const P2PView = {
           </div>
         </div>
       </div>
+
+      <!-- 找歌 -->
+      <div v-if="!loading && activeTab === 'search'">
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:12px;">🔍 在 P2P 网络中找歌</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">通过 DHT 查询哪些节点持有指定歌曲（需先启用 DHT）</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input type="text" v-model="searchArtist" placeholder="艺术家"
+              style="flex:1;min-width:120px;padding:8px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:13px;outline:none;"
+              @keyup.enter="searchSong" />
+            <input type="text" v-model="searchTitle" placeholder="标题"
+              style="flex:1;min-width:120px;padding:8px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:13px;outline:none;"
+              @keyup.enter="searchSong" />
+            <button class="btn btn-primary" @click="searchSong" :disabled="searching">
+              {{ searching ? '搜索中...' : '搜索' }}
+            </button>
+          </div>
+
+          <div v-if="searchResults" style="margin-top:16px;">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">
+              查询: {{ searchResults.query }} · 找到 {{ searchResults.totalHolders || 0 }} 个持有者
+            </div>
+            <div v-if="!searchResults.totalHolders" class="empty-state" style="padding:20px;">
+              <div class="empty-state-icon">😢</div>
+              <p class="empty-state-text">网络中暂无节点持有此歌</p>
+            </div>
+            <div v-else style="background:var(--bg-tertiary);border-radius:8px;padding:12px;">
+              <div v-for="h in searchResults.holders" :key="h.nodeId" style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
+                <code style="font-size:12px;flex:1;color:var(--accent);">{{ h.nodeId }}</code>
+                <span style="font-size:12px;color:var(--text-muted);">{{ h.address }}</span>
+                <span style="font-size:12px;">{{ h.songCount }} 首</span>
+                <span v-if="h.isExact" style="font-size:10px;color:var(--success);background:rgba(46,213,115,0.15);padding:2px 6px;border-radius:4px;">精确命中</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:20px;">
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:12px;">📤 分享本地歌曲</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">将本服务器的歌曲通过 UDP P2P 发送给在线节点（对端需支持猫爪驿站协议）</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="text" v-model="offerSongId" placeholder="本地歌曲 ID（数字）"
+              style="flex:1;min-width:140px;padding:8px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:13px;outline:none;" />
+            <select v-model="offerPeerId"
+              style="flex:1;min-width:140px;padding:8px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:13px;outline:none;">
+              <option value="">选择在线节点...</option>
+              <option v-for="p in peers" :key="p.deviceId" :value="p.deviceId">
+                {{ p.name }} ({{ p.library?.songCount || 0 }} 首)
+              </option>
+            </select>
+            <button class="btn btn-primary" @click="doOffer" :disabled="offering">
+              {{ offering ? '发起中...' : '发起分享' }}
+            </button>
+          </div>
+          <p v-if="!peers.length" style="font-size:11px;color:var(--warning);margin-top:8px;">当前无在线节点，需对端先连接猫爪驿站 WebSocket</p>
+        </div>
+      </div>
+
+      <!-- 传输管理 -->
+      <div v-if="!loading && activeTab === 'transfers'">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="font-size:15px;font-weight:600;">📦 活跃传输任务</h3>
+          <button class="btn btn-secondary" @click="loadTransfers">⟳ 刷新</button>
+        </div>
+
+        <div v-if="!transfers.length" class="empty-state">
+          <div class="empty-state-icon">📭</div>
+          <p class="empty-state-text">暂无传输任务</p>
+          <p class="empty-state-hint">在"找歌"tab 发起分享后，任务将显示在这里</p>
+        </div>
+
+        <div v-else style="display:flex;flex-direction:column;gap:12px;">
+          <div v-for="t in transfers" :key="t.taskId"
+            style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <span style="font-size:11px;padding:2px 8px;border-radius:4px;"
+                :style="t.role === 'sender' ? 'background:rgba(0,212,255,0.15);color:var(--accent);' : 'background:rgba(46,213,115,0.15);color:var(--success);'">
+                {{ t.role === 'sender' ? '发送' : '接收' }}
+              </span>
+              <span style="font-weight:600;font-size:14px;flex:1;">{{ t.fileName || '未知文件' }}</span>
+              <span style="font-size:11px;color:var(--text-muted);">{{ formatSize(t.totalSize) }}</span>
+              <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;" @click="cancelTask(t.taskId)">取消</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="flex:1;height:6px;background:var(--bg-hover);border-radius:3px;overflow:hidden;">
+                <div :style="{ width: formatProgress(t.progress), height:'100%', background: t.status === 'complete' ? 'var(--success)' : t.status === 'failed' ? 'var(--danger)' : 'var(--accent)', borderRadius:'3px', transition:'width 0.3s' }"></div>
+              </div>
+              <span style="font-size:12px;width:90px;text-align:right;color:var(--text-secondary);">
+                {{ t.receivedChunks }}/{{ t.totalChunks }} · {{ formatProgress(t.progress) }}
+              </span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+              任务 {{ t.taskId }} · 对端 {{ (t.peerDeviceId || '').substring(0,12) }}... · {{ t.status }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 小鱼干账本 -->
+      <div v-if="!loading && activeTab === 'ledger'">
+        <!-- 规则说明 -->
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px;padding:10px 14px;background:var(--bg-secondary);border-radius:8px;border-left:3px solid var(--accent);">
+          🐟 <strong>小鱼干规则</strong>：注册赠送 100 🐟 · 在线 1 小时 +10 🐟 · 上传 1 GB +10 🐟 · 下载 1 GB -10 🐟
+        </div>
+
+        <!-- 概览 -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">链高度</div>
+            <div style="font-size:24px;font-weight:700;color:var(--accent);">{{ chainHeight }}</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">持鱼节点</div>
+            <div style="font-size:24px;font-weight:700;">{{ balances.length }}</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">小鱼干总量</div>
+            <div style="font-size:24px;font-weight:700;color:var(--success);">🐟 {{ balances.reduce((s,b) => s + b.balance, 0) }}</div>
+          </div>
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">账本大小</div>
+            <div style="font-size:24px;font-weight:700;color:var(--warning);">{{ formatSize(ledgerSize) }}</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">已修剪至 #{{ prunedToIndex }}</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:16px;padding:8px 12px;background:var(--bg-secondary);border-radius:6px;border-left:3px solid var(--success);">
+          💾 快照+修剪机制：每 500 块自动生成余额快照并删除旧区块，账本大小恒定，不会像 BTC 那样无限膨胀
+        </div>
+
+        <!-- 小鱼干排行 -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
+          <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">🏆 小鱼干排行</h3>
+          <div v-if="!balances.length" style="font-size:12px;color:var(--text-muted);padding:8px 0;">暂无节点注册</div>
+          <div v-else>
+            <div v-for="(b, i) in balances" :key="b.deviceId" style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);">
+              <span style="width:24px;text-align:center;font-size:13px;font-weight:700;color:var(--text-muted);">{{ i + 1 }}</span>
+              <code style="font-size:12px;flex:1;color:var(--text-secondary);">{{ (b.deviceId || '').substring(0,20) }}</code>
+              <span style="font-size:14px;font-weight:600;" :style="{ color: b.balance > 100 ? 'var(--success)' : b.balance < 10 ? 'var(--danger)' : 'var(--accent)' }">🐟 {{ b.balance }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 区块链浏览器 -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
+          <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">⛓ 区块链浏览器（最近 10 块）</h3>
+          <div v-if="!chainBlocks.length" style="font-size:12px;color:var(--text-muted);padding:8px 0;">暂无区块</div>
+          <div v-else style="display:flex;flex-direction:column;gap:8px;">
+            <div v-for="blk in [...chainBlocks].reverse()" :key="blk.index"
+              style="background:var(--bg-tertiary);border-radius:8px;padding:12px;border-left:3px solid var(--accent);">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                <span style="font-size:11px;color:var(--accent);font-weight:600;">#{{ blk.index }}</span>
+                <code style="font-size:10px;color:var(--text-muted);flex:1;">{{ (blk.hash || '').substring(0,24) }}...</code>
+                <span style="font-size:10px;color:var(--text-muted);">{{ formatTime(blk.timestamp) }}</span>
+                <span style="font-size:10px;color:var(--text-secondary);">{{ blk.transactions.length }} 笔交易</span>
+              </div>
+              <div v-for="tx in blk.transactions" :key="tx.id" style="font-size:11px;color:var(--text-secondary);padding:2px 0;">
+                {{ formatTxType(tx.type) }} · 🐟 {{ tx.amount }} · {{ tx.from === 'SYSTEM' ? '→ ' + (tx.to || '').substring(0,12) : (tx.from || '').substring(0,12) + ' → 系统' }} · {{ tx.remark }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 交易历史查询 -->
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;">
+          <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">📋 交易历史查询</h3>
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <input type="text" v-model="historyDeviceId" placeholder="输入 deviceId 查询交易历史"
+              style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:13px;outline:none;"
+              @keyup.enter="loadHistory" />
+            <button class="btn btn-secondary" @click="loadHistory" :disabled="!historyDeviceId.trim()">查询</button>
+          </div>
+          <div v-if="history" style="margin-top:12px;">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">
+              节点余额: <span style="color:var(--success);font-weight:600;">🐟 {{ history.balance }}</span> · 交易总数: {{ history.totalTransactions }}
+            </div>
+            <div v-if="!history.totalTransactions" style="font-size:12px;color:var(--text-muted);">该节点暂无交易记录</div>
+            <div v-else style="background:var(--bg-tertiary);border-radius:8px;padding:10px;">
+              <div v-for="tx in history.transactions" :key="tx.id" style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:11px;">
+                <span style="width:70px;" :style="{ color: tx.type === 'upload' ? 'var(--success)' : tx.type === 'download' ? 'var(--warning)' : 'var(--accent)' }">{{ formatTxType(tx.type) }}</span>
+                <span :style="{ color: tx.type === 'download' ? 'var(--danger)' : 'var(--success)', width:'60px', fontWeight:600 }">{{ tx.type === 'download' ? '-' : '+' }}🐟 {{ tx.amount }}</span>
+                <span style="flex:1;color:var(--text-muted);">{{ tx.remark }}</span>
+                <span style="color:var(--text-muted);">{{ formatTime(tx.timestamp) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   `
 };

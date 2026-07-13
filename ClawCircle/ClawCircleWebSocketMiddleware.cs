@@ -1,11 +1,12 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using CatClawMusicServer.ClawCircle.Ledger;
 
 namespace CatClawMusicServer.ClawCircle;
 
 /// <summary>
-/// 猫爪圈 WebSocket 信令中间件：拦截 <see cref="ClawCircleProtocol.Path"/> 路径，
+/// 猫爪驿站 WebSocket 信令中间件：拦截 <see cref="ClawCircleProtocol.Path"/> 路径，
 /// 完成 token 鉴权、AcceptWebSocket，并分发 register / library_update / query_peer /
 /// find_song / signal / bye 等消息。不匹配该路径时直接短路到下一个中间件。
 ///
@@ -18,16 +19,21 @@ public class ClawCircleWebSocketMiddleware
 
     public ClawCircleWebSocketMiddleware(RequestDelegate next) => _next = next;
 
-    public async Task InvokeAsync(HttpContext context, ClawCircleTracker tracker, ServerAuthOptions auth)
+    public async Task InvokeAsync(HttpContext context, ClawCircleTracker tracker, ServerAuthOptions auth, BlockchainLedger ledger)
     {
         var path = context.Request.Path.Value ?? "";
 
-        // 仅处理猫爪圈信令路径，其余请求交给后续管道
+        // 仅处理猫爪驿站信令路径，其余请求交给后续管道
         if (!path.Equals(ClawCircleProtocol.Path, StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;
         }
+
+        // 订阅账本新区块事件（每个 WebSocket 连接独立订阅，断开时自动 GC）
+        Func<Block, Task> onBlock = block =>
+            tracker.BroadcastAsync(new NewBlockMsg { Block = block }, ct: context.RequestAborted);
+        ledger.OnBlockMined += onBlock;
 
         // ── 鉴权 ──
         if (!string.IsNullOrEmpty(auth.AccessToken))
@@ -58,16 +64,29 @@ public class ClawCircleWebSocketMiddleware
         }
 
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
-        await HandleSocketAsync(context, socket, tracker);
+        try
+        {
+            await HandleSocketAsync(context, socket, tracker, ledger);
+        }
+        finally
+        {
+            // 退订账本事件，避免内存泄漏
+            ledger.OnBlockMined -= onBlock;
+        }
     }
 
-    private async Task HandleSocketAsync(HttpContext context, WebSocket socket, ClawCircleTracker tracker)
+    private async Task HandleSocketAsync(HttpContext context, WebSocket socket, ClawCircleTracker tracker, BlockchainLedger ledger)
     {
         var deviceId = "";
         var ct = context.RequestAborted;
         var buffer = new byte[8192];
         var ms = new MemoryStream();
         var shouldClose = false;
+        const int MaxMessageSize = 256 * 1024; // 256KB 上限，防止恶意大包占满内存
+
+        // 简单速率限制：每秒最多 10 条消息
+        var msgTimestamps = new List<DateTime>();
+        const int MaxMsgPerSecond = 10;
 
         try
         {
@@ -84,9 +103,27 @@ public class ClawCircleWebSocketMiddleware
                         break;
                     }
                     ms.Write(buffer, 0, result.Count);
+
+                    // 消息大小限制
+                    if (ms.Length > MaxMessageSize)
+                    {
+                        await SendSocketJsonAsync(socket, new ErrorMsg { ErrorText = "message too large" });
+                        shouldClose = true;
+                        break;
+                    }
                 } while (!result.EndOfMessage);
 
                 if (shouldClose) break;
+
+                // 速率限制检查
+                var now = DateTime.UtcNow;
+                msgTimestamps.RemoveAll(t => (now - t).TotalSeconds >= 1);
+                if (msgTimestamps.Count >= MaxMsgPerSecond)
+                {
+                    await SendSocketJsonAsync(socket, new ErrorMsg { ErrorText = "rate limit exceeded" });
+                    continue;
+                }
+                msgTimestamps.Add(now);
 
                 ms.Position = 0;
                 JsonDocument? doc = null;
@@ -100,7 +137,7 @@ public class ClawCircleWebSocketMiddleware
                     switch (type)
                     {
                         case ClawCircleProtocol.Register:
-                            deviceId = await HandleRegisterAsync(doc.RootElement, socket, tracker, context);
+                            deviceId = await HandleRegisterAsync(doc.RootElement, socket, tracker, context, ledger);
                             break;
 
                         case ClawCircleProtocol.LibraryUpdate:
@@ -159,7 +196,7 @@ public class ClawCircleWebSocketMiddleware
 
     // ── 各消息处理 ──
 
-    private async Task<string> HandleRegisterAsync(JsonElement root, WebSocket socket, ClawCircleTracker tracker, HttpContext context)
+    private async Task<string> HandleRegisterAsync(JsonElement root, WebSocket socket, ClawCircleTracker tracker, HttpContext context, BlockchainLedger ledger)
     {
         var msg = root.Deserialize<RegisterMsg>(ClawCircleJson.Options) ?? new RegisterMsg();
 
@@ -168,7 +205,8 @@ public class ClawCircleWebSocketMiddleware
             deviceId = context.Request.Query["deviceId"].ToString() ?? "";
         if (string.IsNullOrWhiteSpace(deviceId))
         {
-            await tracker.SendToAsync(deviceId, new ErrorMsg { ErrorText = "register requires deviceId" });
+            // 直接通过 socket 发送错误（此时节点尚未注册，tracker.SendToAsync 找不到目标）
+            await SendSocketJsonAsync(socket, new ErrorMsg { ErrorText = "register requires deviceId" });
             return "";
         }
 
@@ -180,7 +218,12 @@ public class ClawCircleWebSocketMiddleware
 
         // Wan/Port 保存给「UDP 反射端点」使用（由 STUN UDP 服务在节点打 STUN 包时写入）。
         // 此处注册时先用客户端自报值（通常为空），STUN 到达后由 tracker.SetUdpEndpoint 覆盖。
-        var info = tracker.Register(deviceId, name, socket, msg.Wan, msg.Port, msg.RelayOnly, msg.Library);
+        // 记录 WebSocket 源 IP 供 STUN 服务做源 IP 绑定校验。
+        var wsIp = context.Connection.RemoteIpAddress;
+        var info = tracker.Register(deviceId, name, socket, msg.Wan, msg.Port, msg.RelayOnly, msg.Library, wsIp);
+
+        // 注册到积分账本（首次注册赠送 100 积分）
+        ledger.RegisterNode(deviceId);
 
         // 回 welcome（排除自己）
         var welcome = new WelcomeMsg
@@ -195,7 +238,7 @@ public class ClawCircleWebSocketMiddleware
         await tracker.BroadcastAsync(new PeerOnlineMsg { Peer = info }, exceptDeviceId: deviceId,
             ct: CancellationToken.None);
 
-        Console.WriteLine($"[clawcircle] 节点上线: {name} ({deviceId}), 当前在线 {tracker.OnlineCount}");
+        Console.WriteLine($"[clawcircle] 节点上线: {name} ({deviceId}), 积分 {ledger.GetBalance(deviceId)}, 当前在线 {tracker.OnlineCount}");
         return deviceId;
     }
 
@@ -265,6 +308,22 @@ public class ClawCircleWebSocketMiddleware
         catch
         {
             // 忽略关闭阶段的异常
+        }
+    }
+
+    /// <summary>直接通过 socket 发送 JSON 消息（用于节点尚未注册时的错误反馈）。</summary>
+    private static async Task SendSocketJsonAsync(WebSocket socket, object message)
+    {
+        if (socket.State != WebSocketState.Open) return;
+        try
+        {
+            var json = JsonSerializer.Serialize(message, ClawCircleJson.Options);
+            var bytes = Encoding.UTF8.GetBytes(json);
+            await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
+        }
+        catch
+        {
+            // 忽略发送阶段的异常
         }
     }
 }

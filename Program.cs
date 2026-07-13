@@ -1,6 +1,7 @@
 using CatClawMusicServer;
 using CatClawMusicServer.ClawCircle;
 using CatClawMusicServer.ClawCircle.Dht;
+using CatClawMusicServer.ClawCircle.Ledger;
 using CatClawMusicServer.ClawCircle.Transfer;
 using CatClawMusicServer.Data;
 using CatClawMusicServer.Services;
@@ -58,10 +59,12 @@ builder.Services.AddSingleton(new ServerAuthOptions { AccessToken = accessToken,
 builder.Services.AddSingleton<AdminCredentialStore>(sp =>
     new AdminCredentialStore(sp.GetRequiredService<ServerAuthOptions>(), dbPath));
 
-// 猫爪圈 P2P tracker 在线节点注册表（单例）
+// 猫爪驿站 P2P tracker 在线节点注册表（单例）
 builder.Services.AddSingleton<ClawCircleTracker>();
 builder.Services.AddSingleton<NodeReputation>();
 builder.Services.AddSingleton<TransferEngine>();
+builder.Services.AddSingleton<UdpTransferProtocol>();
+builder.Services.AddSingleton<BlockchainLedger>();
 
 // DHT 配置
 var dhtSection = builder.Configuration.GetSection("ClawCircle");
@@ -69,11 +72,34 @@ var dhtOpts = new DhtOptions
 {
     Enabled = bool.TryParse(dhtSection["DhtEnabled"], out var de) && de,
     Port = int.TryParse(dhtSection["DhtPort"], out var dp) ? dp : 37825,
-    NodeIdSeed = dhtSection["NodeIdSeed"] ?? "catclaw-default-node"
+    NodeIdSeed = dhtSection["NodeIdSeed"] ?? ""
 };
+
+// NodeIdSeed 持久化：配置为空时首次启动随机生成并保存到 Data/node_id.txt，
+// 避免所有部署共享相同 NodeId 导致 DHT 路由错乱。
+if (string.IsNullOrEmpty(dhtOpts.NodeIdSeed) || dhtOpts.NodeIdSeed == "catclaw-default-node")
+{
+    var nodeIdFile = Path.Combine(Path.GetDirectoryName(dbPath)!, "node_id.txt");
+    if (File.Exists(nodeIdFile))
+    {
+        dhtOpts.NodeIdSeed = File.ReadAllText(nodeIdFile).Trim();
+    }
+    else
+    {
+        // 首次启动：生成随机种子并持久化
+        var bytes = new byte[32];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
+        dhtOpts.NodeIdSeed = Convert.ToHexString(bytes);
+        await File.WriteAllTextAsync(nodeIdFile, dhtOpts.NodeIdSeed);
+        Console.WriteLine($"[clawcircle] 首次启动生成 NodeIdSeed 并持久化到 {nodeIdFile}");
+    }
+}
+
 var bootstrapStr = dhtSection["BootstrapNodes"];
 if (!string.IsNullOrEmpty(bootstrapStr))
-    dhtOpts.BootstrapNodes = bootstrapStr.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+    dhtOpts.BootstrapNodes = bootstrapStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+else
+    dhtOpts.BootstrapNodes = new List<string>(); // 不再硬编码开发者域名
 builder.Services.AddSingleton(dhtOpts);
 builder.Services.AddSingleton<DhtService>(sp =>
     new DhtService(
@@ -241,7 +267,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 app.UseWebSockets();  // 启用 WebSocket 升级处理（ClawCircle 信令依赖）
-app.UseMiddleware<ClawCircleWebSocketMiddleware>(); // 猫爪圈 WebSocket 信令（拦截 /ws/clawcircle，自带 token 鉴权）
+app.UseMiddleware<ClawCircleWebSocketMiddleware>(); // 猫爪驿站 WebSocket 信令（拦截 /ws/clawcircle，自带 token 鉴权）
 app.UseMiddleware<ApiAuthMiddleware>();   // 内网鉴权（/api 与 /rest）
 app.UseMiddleware<WebUiAuthMiddleware>(); // Web UI 静态页面鉴权（cookie 登录，未登录跳 login.html）
 app.UseDefaultFiles();   // 支持 index.html 默认文件
@@ -261,12 +287,31 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
 }
 
-// ── 启动猫爪圈 STUN（UDP 反射端点探测，端口 = HTTP 端口 + 1）──
+// ── 启动猫爪驿站 STUN（UDP 反射端点探测 + P2P 传输多路复用，端口 = HTTP 端口 + 1）──
 var stunPort = (cliPort ?? ParsePort(config["Kestrel:EndPoints:HttpV4:Url"] ?? config["ASPNETCORE_URLS"] ?? "") ?? 37823) + 1;
 var stunService = new CatClawMusicServer.ClawCircle.ClawCircleStunService(
-    app.Services.GetRequiredService<CatClawMusicServer.ClawCircle.ClawCircleTracker>(), stunPort);
+    app.Services.GetRequiredService<CatClawMusicServer.ClawCircle.ClawCircleTracker>(),
+    stunPort,
+    app.Services.GetRequiredService<CatClawMusicServer.ClawCircle.Transfer.UdpTransferProtocol>());
 stunService.Start();
 app.Lifetime.ApplicationStopping.Register(() => stunService.Stop());
+
+// ── 定时清理：信誉记录（30 天未见）+ 过期传输任务（2 小时）（每 30 分钟）──
+var repCleanup = app.Services.GetRequiredService<NodeReputation>();
+var engCleanup = app.Services.GetRequiredService<TransferEngine>();
+var cleanTimer = new System.Threading.Timer(_ =>
+{
+    try { repCleanup.Cleanup(); } catch { }
+    try { engCleanup.Cleanup(TimeSpan.FromHours(2)); } catch { }
+}, null, TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30));
+app.Lifetime.ApplicationStopping.Register(() => cleanTimer.Dispose());
+
+// ── 启动区块链积分账本（定时出块 + 在线奖励 + 修剪）──
+var ledger = app.Services.GetRequiredService<BlockchainLedger>();
+var trackerForLedger = app.Services.GetRequiredService<ClawCircleTracker>();
+ledger.SetOnlineNodesProvider(() => trackerForLedger.GetOnlineNodes());
+ledger.Start();
+app.Lifetime.ApplicationStopping.Register(() => ledger.Stop());
 
 // ── 启动 DHT 服务（可选，Kademlia 去中心化节点发现）──
 var dhtOptions = app.Services.GetRequiredService<DhtOptions>();

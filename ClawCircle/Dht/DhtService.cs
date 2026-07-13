@@ -131,39 +131,67 @@ public class DhtService : IDisposable
         }
     }
 
-    /// <summary>迭代查找距离目标最近的 K 个节点</summary>
+    /// <summary>迭代查找距离目标最近的 K 个节点（Kademlia α=3 并发查询）</summary>
     public async Task<List<DhtNode>> IterativeFindNodeAsync(NodeId target)
     {
-        var closest = _routing.FindClosest(target, RoutingTable.Alpha);
+        var closest = _routing.FindClosest(target, RoutingTable.K);
         if (closest.Count == 0) return new List<DhtNode>();
 
         var queried = new HashSet<string>();
         var result = new List<DhtNode>(closest);
 
-        foreach (var node in closest)
+        // 迭代查询：每轮并发 α 个未查询节点，直到无新节点返回
+        while (true)
         {
-            if (queried.Contains(node.Id.ToString())) continue;
-            queried.Add(node.Id.ToString());
+            // 选出本轮要查询的 α 个未查询节点
+            var toQuery = result
+                .Where(n => !queried.Contains(n.Id.ToString()))
+                .OrderBy(n => target.XorDistance(n.Id))
+                .Take(RoutingTable.Alpha)
+                .ToList();
 
-            var resp = await SendRpcAsync(node.Endpoint, new DhtRpcRequest
+            if (toQuery.Count == 0) break;
+
+            // 并发发送 FIND_NODE
+            var tasks = toQuery.Select(node => SendRpcAsync(node.Endpoint, new DhtRpcRequest
             {
                 Type = DhtRpcType.FindNode,
                 SenderId = _routing.LocalId.ToString(),
                 Target = target.ToString(),
                 Id = NewRpcId()
-            });
+            })).ToList();
 
-            if (resp?.Nodes != null)
+            foreach (var node in toQuery)
+                queried.Add(node.Id.ToString());
+
+            var responses = await Task.WhenAll(tasks);
+            var newAdded = false;
+
+            foreach (var resp in responses)
             {
+                if (resp?.Nodes == null) continue;
                 foreach (var n in resp.Nodes)
                 {
-                    var nodeId = NodeId.FromHex(n.Id);
-                    var ep = new IPEndPoint(IPAddress.Parse(n.Address), n.Port);
-                    var dhtNode = new DhtNode { Id = nodeId, Endpoint = ep };
-                    _routing.AddOrUpdate(dhtNode);
-                    result.Add(dhtNode);
+                    try
+                    {
+                        var nodeId = NodeId.FromHex(n.Id);
+                        if (nodeId == _routing.LocalId) continue;
+                        var ep = new IPEndPoint(IPAddress.Parse(n.Address), n.Port);
+                        var dhtNode = new DhtNode { Id = nodeId, Endpoint = ep };
+                        _routing.AddOrUpdate(dhtNode);
+
+                        // 只添加不在结果集的新节点
+                        if (!result.Any(r => r.Id == nodeId))
+                        {
+                            result.Add(dhtNode);
+                            newAdded = true;
+                        }
+                    }
+                    catch { /* 忽略解析错误 */ }
                 }
             }
+
+            if (!newAdded) break;
         }
 
         // 按距离排序，返回最近的 K 个
@@ -378,26 +406,73 @@ public class DhtService : IDisposable
         await _udp!.SendAsync(bytes, bytes.Length, target);
     }
 
-    /// <summary>后台维护：刷新路由表、发布曲库索引</summary>
+    /// <summary>后台维护：按桶刷新路由表、节点活跃 PING、定期重发布曲库索引、存储清理</summary>
     private async Task MaintenanceLoopAsync(CancellationToken ct)
     {
         // 首次启动延迟 10 秒，等待 bootstrap 完成
         await Task.Delay(TimeSpan.FromSeconds(10), ct);
         await PublishLibraryIndexAsync();
 
+        var bucketRefreshCursor = 0; // 轮询桶索引
         while (!ct.IsCancellationRequested)
         {
-            await Task.Delay(TimeSpan.FromMinutes(5), ct);
+            await Task.Delay(TimeSpan.FromMinutes(1), ct);
 
-            // 刷新路由表
-            var randomId = NodeId.Random();
-            await IterativeFindNodeAsync(randomId);
+            try
+            {
+                // 1. 按桶刷新：每分钟刷新一个桶（160 桶 ~2.7 小时一轮）
+                var refreshId = NodeId.Random();
+                if (bucketRefreshCursor < RoutingTable.BucketCount)
+                {
+                    // 生成本桶范围内的随机 ID
+                    var bucketNodes = _routing.GetBucket(bucketRefreshCursor);
+                    if (bucketNodes.Count > 0)
+                    {
+                        // 查找该桶已有节点附近的节点来补充
+                        await IterativeFindNodeAsync(bucketNodes[0].Id);
+                    }
+                    else
+                    {
+                        // 空桶：用随机 ID 查找填充
+                        await IterativeFindNodeAsync(refreshId);
+                    }
+                    bucketRefreshCursor = (bucketRefreshCursor + 1) % RoutingTable.BucketCount;
+                }
 
-            // 每 30 分钟重新发布曲库索引
-            if ((DateTime.UtcNow - _lastLibraryPublish).TotalMinutes >= 30)
-                await PublishLibraryIndexAsync();
+                // 2. 节点活跃 PING：检查 10 分钟未响应的节点
+                var stale = _routing.GetAllNodes()
+                    .Where(n => (DateTime.UtcNow - n.LastSeen).TotalMinutes > 10)
+                    .Take(10)
+                    .ToList();
+                foreach (var node in stale)
+                {
+                    var resp = await SendRpcAsync(node.Endpoint, new DhtRpcRequest
+                    {
+                        Type = DhtRpcType.Ping,
+                        SenderId = _routing.LocalId.ToString(),
+                        Id = NewRpcId()
+                    });
+                    if (resp == null)
+                    {
+                        // PING 超时，从路由表移除
+                        _routing.Remove(node.Id);
+                        _logger.LogDebug("DHT 节点超时移除: {Id}", node.Id);
+                    }
+                }
 
-            _logger.LogDebug("DHT 维护: {Summary}, 曲库={Songs}首", _routing.Summary(), _librarySongCount);
+                // 3. 每 30 分钟重新发布曲库索引（STORE 重发布）
+                if ((DateTime.UtcNow - _lastLibraryPublish).TotalMinutes >= 30)
+                    await PublishLibraryIndexAsync();
+
+                // 4. 存储清理（过期 TTL）
+                _store.Cleanup();
+
+                _logger.LogDebug("DHT 维护: {Summary}, 曲库={Songs}首", _routing.Summary(), _librarySongCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "DHT 维护循环异常");
+            }
         }
     }
 
@@ -449,45 +524,47 @@ public class DhtService : IDisposable
         }
     }
 
-    /// <summary>在 DHT 网络中查找拥有指定歌曲的节点</summary>
+    /// <summary>在 DHT 网络中查找拥有指定歌曲的节点（并发查询所有已知节点）</summary>
     public async Task<List<SongHolder>> FindSongHoldersAsync(string songKey)
     {
         var holders = new List<SongHolder>();
         var normalizedKey = songKey.ToLowerInvariant();
+        var allNodes = _routing.GetAllNodes();
 
-        // 查找所有已知的 library:* 键
-        foreach (var node in _routing.GetAllNodes())
+        // 并发查询所有已知节点的 library 索引
+        var tasks = allNodes.Select(async node =>
         {
             var key = $"library:{node.Id}";
             var value = _store.Get(key);
             if (value == null)
-            {
-                // 尝试从 DHT 网络获取
                 value = await FindValueAsync(key);
-            }
-
-            if (value == null) continue;
+            if (value == null) return null;
 
             try
             {
                 var payload = JsonSerializer.Deserialize<LibraryIndexPayload>(value, _jsonOpts);
-                if (payload?.Filter == null) continue;
+                if (payload?.Filter == null) return null;
 
                 var filter = BloomFilter.Import(payload.Filter);
                 if (filter.Contains(normalizedKey))
                 {
-                    holders.Add(new SongHolder
+                    return new SongHolder
                     {
                         NodeId = payload.NodeId,
                         Address = node.Endpoint.ToString(),
                         SongCount = payload.SongCount,
                         Timestamp = payload.Timestamp,
-                        IsExact = false // Bloom Filter 有误判可能
-                    });
+                        IsExact = false
+                    };
                 }
             }
             catch { /* 忽略解析错误 */ }
-        }
+            return null;
+        }).ToList();
+
+        var results = await Task.WhenAll(tasks);
+        foreach (var h in results)
+            if (h != null) holders.Add(h);
 
         return holders;
     }
@@ -540,8 +617,8 @@ public class DhtOptions
 {
     public bool Enabled { get; set; } = true;
     public int Port { get; set; } = 37825;
-    public string NodeIdSeed { get; set; } = "catclaw-default-node";
-    public List<string> BootstrapNodes { get; set; } = new() { "nas.08102516.xyz:37825" };
+    public string NodeIdSeed { get; set; } = "";
+    public List<string> BootstrapNodes { get; set; } = new();
 }
 
 // ── RPC 消息 ──
