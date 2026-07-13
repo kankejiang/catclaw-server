@@ -1277,6 +1277,7 @@ const P2PView = {
     // 注册表单
     const regUsername = ref('');
     const regPassword = ref('');
+    const regPasswordConfirm = ref('');
     const regDisplayName = ref('');
     // 修改密码表单
     const oldPassword = ref('');
@@ -1369,6 +1370,10 @@ const P2PView = {
         showToast('密码至少 6 位', 'error');
         return;
       }
+      if (regPassword.value !== regPasswordConfirm.value) {
+        showToast('两次输入的密码不一致', 'error');
+        return;
+      }
       clawRegistering.value = true;
       try {
         const r = await api.registerAccount(regUsername.value.trim(), regPassword.value, regDisplayName.value.trim());
@@ -1378,6 +1383,7 @@ const P2PView = {
           loginUsername.value = regUsername.value.trim();
           regUsername.value = '';
           regPassword.value = '';
+          regPasswordConfirm.value = '';
           regDisplayName.value = '';
         } else {
           showToast('注册失败：' + (r?.error || '未知错误'), 'error');
@@ -1473,7 +1479,7 @@ const P2PView = {
       historyDeviceId, history, loadHistory, formatTxType, formatTime,
       // 账号体系
       clawToken, clawAccount, clawDevices, clawLoggingIn, clawRegistering,
-      loginUsername, loginPassword, regUsername, regPassword, regDisplayName,
+      loginUsername, loginPassword, regUsername, regPassword, regPasswordConfirm, regDisplayName,
       oldPassword, newPassword, changingPwd, authMode,
       clawLogin, clawRegister, clawLogout, revokeClawDevice, clawChangePassword,
       loadClawMe, loadClawDevices, refreshClawBalance, getDeviceId
@@ -1819,7 +1825,7 @@ const P2PView = {
             </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">密码</label>
-              <input type="password" v-model="loginPassword" placeholder="至少 6 位"
+              <input type="password" v-model="loginPassword" placeholder="至少 6 位（支持中文）"
                 style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"
                 @keyup.enter="clawLogin" />
             </div>
@@ -1845,10 +1851,17 @@ const P2PView = {
               <input type="text" v-model="regDisplayName" placeholder="展示给其他用户看的名字"
                 style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
             </div>
-            <div style="margin-bottom:16px;">
+            <div style="margin-bottom:12px;">
               <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">密码</label>
-              <input type="password" v-model="regPassword" placeholder="至少 6 位"
+              <input type="password" v-model="regPassword" placeholder="至少 6 位（支持中文）"
                 style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">确认密码</label>
+              <input type="password" v-model="regPasswordConfirm" placeholder="再次输入密码"
+                style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"
+                @keyup.enter="clawRegister" />
+              <div v-if="regPasswordConfirm && regPassword !== regPasswordConfirm" style="font-size:11px;color:var(--danger);margin-top:4px;">两次输入的密码不一致</div>
             </div>
             <button class="btn btn-primary" style="width:100%;" @click="clawRegister" :disabled="clawRegistering">
               {{ clawRegistering ? '注册中...' : '注册（赠送 100 🐟）' }}
@@ -1924,7 +1937,7 @@ const P2PView = {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
               <input type="password" v-model="oldPassword" placeholder="原密码"
                 style="padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
-              <input type="password" v-model="newPassword" placeholder="新密码（至少 6 位）"
+              <input type="password" v-model="newPassword" placeholder="新密码（至少 6 位，支持中文）"
                 style="padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
             </div>
             <button class="btn btn-primary" @click="clawChangePassword" :disabled="changingPwd">
