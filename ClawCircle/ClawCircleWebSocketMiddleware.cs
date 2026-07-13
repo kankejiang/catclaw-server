@@ -19,7 +19,8 @@ public class ClawCircleWebSocketMiddleware
 
     public ClawCircleWebSocketMiddleware(RequestDelegate next) => _next = next;
 
-    public async Task InvokeAsync(HttpContext context, ClawCircleTracker tracker, ServerAuthOptions auth, BlockchainLedger ledger)
+    public async Task InvokeAsync(HttpContext context, ClawCircleTracker tracker, ServerAuthOptions auth,
+        BlockchainLedger ledger, CatClawMusicServer.ClawCircle.Accounts.AccountService accountService)
     {
         var path = context.Request.Path.Value ?? "";
 
@@ -35,8 +36,23 @@ public class ClawCircleWebSocketMiddleware
             tracker.BroadcastAsync(new NewBlockMsg { Block = block }, ct: context.RequestAborted);
         ledger.OnBlockMined += onBlock;
 
-        // ── 鉴权 ──
-        if (!string.IsNullOrEmpty(auth.AccessToken))
+        // ── 鉴权（二选一）──
+        // 优先用 clawToken（账号 Token），其次用服务端 AccessToken
+        long? accountId = null;
+        var clawToken = context.Request.Query["clawToken"].ToString() ?? "";
+        if (!string.IsNullOrEmpty(clawToken))
+        {
+            var account = await accountService.ValidateTokenAsync(clawToken);
+            if (account == null)
+            {
+                context.Response.StatusCode = 401;
+                context.Response.ContentType = "text/plain; charset=utf-8";
+                await context.Response.WriteAsync("Invalid claw token");
+                return;
+            }
+            accountId = account.Id;
+        }
+        else if (!string.IsNullOrEmpty(auth.AccessToken))
         {
             var tok = context.Request.Query["token"].ToString() ?? "";
             if (string.IsNullOrEmpty(tok))
@@ -66,7 +82,7 @@ public class ClawCircleWebSocketMiddleware
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
         try
         {
-            await HandleSocketAsync(context, socket, tracker, ledger);
+            await HandleSocketAsync(context, socket, tracker, ledger, accountService, accountId);
         }
         finally
         {
@@ -75,7 +91,8 @@ public class ClawCircleWebSocketMiddleware
         }
     }
 
-    private async Task HandleSocketAsync(HttpContext context, WebSocket socket, ClawCircleTracker tracker, BlockchainLedger ledger)
+    private async Task HandleSocketAsync(HttpContext context, WebSocket socket, ClawCircleTracker tracker,
+        BlockchainLedger ledger, CatClawMusicServer.ClawCircle.Accounts.AccountService accountService, long? accountId)
     {
         var deviceId = "";
         var ct = context.RequestAborted;
@@ -137,7 +154,7 @@ public class ClawCircleWebSocketMiddleware
                     switch (type)
                     {
                         case ClawCircleProtocol.Register:
-                            deviceId = await HandleRegisterAsync(doc.RootElement, socket, tracker, context, ledger);
+                            deviceId = await HandleRegisterAsync(doc.RootElement, socket, tracker, context, ledger, accountService, accountId);
                             break;
 
                         case ClawCircleProtocol.LibraryUpdate:
@@ -196,7 +213,8 @@ public class ClawCircleWebSocketMiddleware
 
     // ── 各消息处理 ──
 
-    private async Task<string> HandleRegisterAsync(JsonElement root, WebSocket socket, ClawCircleTracker tracker, HttpContext context, BlockchainLedger ledger)
+    private async Task<string> HandleRegisterAsync(JsonElement root, WebSocket socket, ClawCircleTracker tracker, HttpContext context, BlockchainLedger ledger,
+        CatClawMusicServer.ClawCircle.Accounts.AccountService accountService, long? accountId)
     {
         var msg = root.Deserialize<RegisterMsg>(ClawCircleJson.Options) ?? new RegisterMsg();
 
@@ -222,8 +240,17 @@ public class ClawCircleWebSocketMiddleware
         var wsIp = context.Connection.RemoteIpAddress;
         var info = tracker.Register(deviceId, name, socket, msg.Wan, msg.Port, msg.RelayOnly, msg.Library, wsIp);
 
-        // 注册到积分账本（首次注册赠送 100 积分）
-        ledger.RegisterNode(deviceId);
+        // 关联 deviceId 到账号（若通过 clawToken 鉴权），积分将记录在账号维度
+        if (accountId.HasValue)
+        {
+            ledger.BindDeviceToAccount(deviceId, accountId.Value);
+            Console.WriteLine($"[clawcircle] 设备 {deviceId} 关联到账号 #{accountId.Value}");
+        }
+        else
+        {
+            // 旧式无账号的设备，按 deviceId 记账
+            ledger.RegisterNode(deviceId);
+        }
 
         // 回 welcome（排除自己）
         var welcome = new WelcomeMsg
@@ -238,7 +265,7 @@ public class ClawCircleWebSocketMiddleware
         await tracker.BroadcastAsync(new PeerOnlineMsg { Peer = info }, exceptDeviceId: deviceId,
             ct: CancellationToken.None);
 
-        Console.WriteLine($"[clawcircle] 节点上线: {name} ({deviceId}), 积分 {ledger.GetBalance(deviceId)}, 当前在线 {tracker.OnlineCount}");
+        Console.WriteLine($"[clawcircle] 节点上线: {name} ({deviceId}), 账号 {(accountId.HasValue ? "#" + accountId.Value : "未绑定")}, 当前在线 {tracker.OnlineCount}");
         return deviceId;
     }
 

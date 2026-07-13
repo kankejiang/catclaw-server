@@ -1,4 +1,5 @@
 using CatClawMusicServer.ClawCircle;
+using CatClawMusicServer.ClawCircle.Accounts;
 using CatClawMusicServer.ClawCircle.Dht;
 using CatClawMusicServer.ClawCircle.Ledger;
 using CatClawMusicServer.ClawCircle.Transfer;
@@ -19,6 +20,7 @@ public class ClawCircleController : ControllerBase
     private readonly UdpTransferProtocol _udp;
     private readonly NodeReputation _reputation;
     private readonly BlockchainLedger _ledger;
+    private readonly AccountService _accounts;
     private readonly IDbContextFactory<ApplicationDbContext> _dbf;
 
     public ClawCircleController(
@@ -29,6 +31,7 @@ public class ClawCircleController : ControllerBase
         UdpTransferProtocol udp,
         NodeReputation reputation,
         BlockchainLedger ledger,
+        AccountService accounts,
         IDbContextFactory<ApplicationDbContext> dbf)
     {
         _tracker = tracker;
@@ -38,6 +41,7 @@ public class ClawCircleController : ControllerBase
         _udp = udp;
         _reputation = reputation;
         _ledger = ledger;
+        _accounts = accounts;
         _dbf = dbf;
     }
 
@@ -131,15 +135,30 @@ public class ClawCircleController : ControllerBase
     // ── 区块链积分账本 ──
 
     [HttpGet("ledger/balance")]
-    public IActionResult GetBalance([FromQuery] string deviceId)
+    public IActionResult GetBalance([FromQuery] string deviceId, [FromQuery] long? accountId)
     {
-        if (string.IsNullOrEmpty(deviceId))
-            return BadRequest("需要 deviceId 参数");
+        long balance;
+        List<Transaction> history;
+        if (accountId.HasValue)
+        {
+            balance = _ledger.GetBalance(accountId.Value);
+            history = _ledger.GetHistory(accountId.Value);
+        }
+        else if (!string.IsNullOrEmpty(deviceId))
+        {
+            balance = _ledger.GetBalanceByDeviceAsync(deviceId).GetAwaiter().GetResult();
+            history = _ledger.GetHistoryByDevice(deviceId);
+        }
+        else
+        {
+            return BadRequest("需要 deviceId 或 accountId 参数");
+        }
         return Ok(new
         {
+            accountId,
             deviceId,
-            balance = _ledger.GetBalance(deviceId),
-            history = _ledger.GetHistory(deviceId).Take(50)
+            balance,
+            history = history.Take(50)
         });
     }
 
@@ -168,14 +187,26 @@ public class ClawCircleController : ControllerBase
         });
     }
 
-    [HttpGet("ledger/history/{deviceId}")]
-    public IActionResult GetHistory(string deviceId)
+    [HttpGet("ledger/history/{deviceIdOrAccountId}")]
+    public IActionResult GetHistory(string deviceIdOrAccountId)
     {
-        var history = _ledger.GetHistory(deviceId);
+        // 优先按 accountId 解析（数字），否则按 deviceId
+        List<Transaction> history;
+        long balance;
+        if (long.TryParse(deviceIdOrAccountId, out var accId))
+        {
+            history = _ledger.GetHistory(accId);
+            balance = _ledger.GetBalance(accId);
+        }
+        else
+        {
+            history = _ledger.GetHistoryByDevice(deviceIdOrAccountId);
+            balance = _ledger.GetBalanceByDeviceAsync(deviceIdOrAccountId).GetAwaiter().GetResult();
+        }
         return Ok(new
         {
-            deviceId,
-            balance = _ledger.GetBalance(deviceId),
+            query = deviceIdOrAccountId,
+            balance,
             totalTransactions = history.Count,
             transactions = history.Take(100)
         });
@@ -345,10 +376,106 @@ public class ClawCircleController : ControllerBase
             ? Ok(new { message = "Bootstrap 成功" })
             : BadRequest("Bootstrap 失败，请检查地址格式（示例: 192.168.1.100:37825 或 domain.com:37825）");
     }
+
+    // ── 账号端点 ──
+
+    /// <summary>注册猫爪驿站账号。</summary>
+    [HttpPost("account/register")]
+    public async Task<IActionResult> RegisterAccount([FromBody] RegisterAccountRequest req)
+    {
+        if (string.IsNullOrEmpty(req.Username) || string.IsNullOrEmpty(req.Password))
+            return BadRequest("用户名和密码不能为空");
+        var (account, error) = await _accounts.RegisterAsync(req.Username, req.Password, req.DisplayName ?? "");
+        if (account == null) return BadRequest(error);
+        // 账本注册（赠送初始小鱼干）
+        _ledger.RegisterAccount(account.Id);
+        return Ok(new
+        {
+            accountId = account.Id,
+            username = account.Username,
+            displayName = account.DisplayName,
+            balance = _ledger.GetBalance(account.Id)
+        });
+    }
+
+    /// <summary>登录并签发设备 Token。Token 仅此一次返回，请妥善保存。</summary>
+    [HttpPost("account/login")]
+    public async Task<IActionResult> Login([FromBody] ClawLoginRequest req)
+    {
+        if (string.IsNullOrEmpty(req.Username) || string.IsNullOrEmpty(req.Password) || string.IsNullOrEmpty(req.DeviceId))
+            return BadRequest("用户名、密码、deviceId 不能为空");
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var (result, error) = await _accounts.LoginAsync(req.Username, req.Password, req.DeviceId, req.DeviceName ?? "", ip);
+        if (result == null) return BadRequest(error);
+        // 绑定设备到账本账号
+        _ledger.BindDeviceToAccount(req.DeviceId, result.AccountId);
+        return Ok(new
+        {
+            token = result.Token,
+            accountId = result.AccountId,
+            username = result.Username,
+            displayName = result.DisplayName,
+            deviceId = result.DeviceId,
+            deviceName = result.DeviceName,
+            balance = _ledger.GetBalance(result.AccountId)
+        });
+    }
+
+    /// <summary>查询当前账号信息（通过 Token）。</summary>
+    [HttpGet("account/me")]
+    public async Task<IActionResult> GetMe([FromQuery] string token)
+    {
+        var account = await _accounts.ValidateTokenAsync(token);
+        if (account == null) return Unauthorized("无效 Token");
+        return Ok(new
+        {
+            accountId = account.Id,
+            username = account.Username,
+            displayName = account.DisplayName,
+            balance = _ledger.GetBalance(account.Id),
+            createdAt = account.CreatedAt,
+            lastLoginAt = account.LastLoginAt
+        });
+    }
+
+    /// <summary>列出账号下所有设备。</summary>
+    [HttpGet("account/devices")]
+    public async Task<IActionResult> ListDevices([FromQuery] string token)
+    {
+        var account = await _accounts.ValidateTokenAsync(token);
+        if (account == null) return Unauthorized("无效 Token");
+        var devices = await _accounts.ListDevicesAsync(account.Id);
+        return Ok(new { devices });
+    }
+
+    /// <summary>吊销指定设备 Token（退出登录）。</summary>
+    [HttpDelete("account/devices/{deviceId}")]
+    public async Task<IActionResult> RevokeDevice(string deviceId, [FromQuery] string token)
+    {
+        var account = await _accounts.ValidateTokenAsync(token);
+        if (account == null) return Unauthorized("无效 Token");
+        var ok = await _accounts.RevokeDeviceAsync(account.Id, deviceId);
+        return ok ? Ok(new { message = "设备已退出" }) : NotFound("设备不存在");
+    }
+
+    /// <summary>修改密码（所有设备 Token 自动失效，需重新登录）。</summary>
+    [HttpPost("account/change-password")]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest req)
+    {
+        if (string.IsNullOrEmpty(req.Token) || string.IsNullOrEmpty(req.OldPassword) || string.IsNullOrEmpty(req.NewPassword))
+            return BadRequest("参数不完整");
+        var account = await _accounts.ValidateTokenAsync(req.Token);
+        if (account == null) return Unauthorized("无效 Token");
+        var (ok, error) = await _accounts.ChangePasswordAsync(account.Id, req.OldPassword, req.NewPassword);
+        return ok ? Ok(new { message = "密码已修改，所有设备需重新登录" }) : BadRequest(error);
+    }
 }
 
 public record ToggleDhtRequest(bool Enabled);
 public record BootstrapDhtRequest(string Address);
+public record RegisterAccountRequest(string Username, string Password, string? DisplayName);
+public record ClawLoginRequest(string Username, string Password, string DeviceId, string? DeviceName);
+public record ChangePasswordRequest(string Token, string OldPassword, string NewPassword);
 public record OfferTransferRequest(string SongId, string PeerDeviceId, string? TaskId);
 public record ReceiveTransferRequest(string TaskId, string PeerDeviceId, PieceManifest Manifest);
 

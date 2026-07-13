@@ -1,4 +1,5 @@
 using System;
+using CatClawMusicServer.ClawCircle.Accounts;
 using CatClawMusicServer.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -29,6 +30,10 @@ public class ApplicationDbContext : DbContext
     public DbSet<Scrobble> Scrobbles => Set<Scrobble>();
     public DbSet<PlayQueue> PlayQueues => Set<PlayQueue>();
     public DbSet<StatsDaily> StatsDaily => Set<StatsDaily>();
+
+    // ── 猫爪驿站账号 ──
+    public DbSet<ClawCircleAccount> ClawCircleAccounts => Set<ClawCircleAccount>();
+    public DbSet<ClawCircleDevice> ClawCircleDevices => Set<ClawCircleDevice>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -207,5 +212,18 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<StatsDaily>()
             .HasIndex(s => new { s.UserId, s.Date })
             .IsUnique();
+
+        // ── 猫爪驿站账号 ──
+        modelBuilder.Entity<ClawCircleAccount>().ToTable("ClawCircleAccounts");
+        modelBuilder.Entity<ClawCircleAccount>().HasIndex(a => a.Username).IsUnique();
+
+        modelBuilder.Entity<ClawCircleDevice>().ToTable("ClawCircleDevices");
+        modelBuilder.Entity<ClawCircleDevice>()
+            .HasOne(d => d.Account)
+            .WithMany(a => a.Devices)
+            .HasForeignKey(d => d.AccountId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ClawCircleDevice>().HasIndex(d => d.DeviceId);
+        modelBuilder.Entity<ClawCircleDevice>().HasIndex(d => d.TokenHash);
     }
 }

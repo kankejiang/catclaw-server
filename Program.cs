@@ -65,6 +65,7 @@ builder.Services.AddSingleton<NodeReputation>();
 builder.Services.AddSingleton<TransferEngine>();
 builder.Services.AddSingleton<UdpTransferProtocol>();
 builder.Services.AddSingleton<BlockchainLedger>();
+builder.Services.AddSingleton<CatClawMusicServer.ClawCircle.Accounts.AccountService>();
 
 // DHT 配置
 var dhtSection = builder.Configuration.GetSection("ClawCircle");
@@ -309,7 +310,14 @@ app.Lifetime.ApplicationStopping.Register(() => cleanTimer.Dispose());
 // ── 启动区块链积分账本（定时出块 + 在线奖励 + 修剪）──
 var ledger = app.Services.GetRequiredService<BlockchainLedger>();
 var trackerForLedger = app.Services.GetRequiredService<ClawCircleTracker>();
+var accountServiceForLedger = app.Services.GetRequiredService<CatClawMusicServer.ClawCircle.Accounts.AccountService>();
 ledger.SetOnlineNodesProvider(() => trackerForLedger.GetOnlineNodes());
+// 注入 deviceId → accountId 解析器（异步，账本通过此回调将设备传输记账归到账号）
+ledger.SetDeviceAccountResolver(async deviceId =>
+{
+    var acc = await accountServiceForLedger.FindByDeviceIdAsync(deviceId);
+    return acc?.Id;
+});
 ledger.Start();
 app.Lifetime.ApplicationStopping.Register(() => ledger.Stop());
 

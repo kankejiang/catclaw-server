@@ -1264,7 +1264,203 @@ const P2PView = {
       return new Date(ms).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     }
 
-    onMounted(() => { load(); pollTimer = setInterval(loadTransfers, 2000); });
+    // ── 账号体系 ──
+    // clawToken 持久化在 localStorage（多设备 Token，每设备一份）
+    const clawToken = ref(localStorage.getItem('clawToken') || '');
+    const clawAccount = ref(null);     // 当前账号信息 { accountId, username, displayName, balance, ... }
+    const clawDevices = ref([]);       // 设备列表
+    const clawLoggingIn = ref(false);
+    const clawRegistering = ref(false);
+    // 登录表单
+    const loginUsername = ref('');
+    const loginPassword = ref('');
+    // 注册表单
+    const regUsername = ref('');
+    const regPassword = ref('');
+    const regDisplayName = ref('');
+    // 修改密码表单
+    const oldPassword = ref('');
+    const newPassword = ref('');
+    const changingPwd = ref(false);
+    // 账号视图模式：'login' | 'register'
+    const authMode = ref('login');
+
+    // 设备 ID（每浏览器一份，持久化）
+    function getDeviceId() {
+      let id = localStorage.getItem('clawDeviceId');
+      if (!id) {
+        id = 'web-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+        localStorage.setItem('clawDeviceId', id);
+      }
+      return id;
+    }
+    function getDeviceName() {
+      const ua = navigator.userAgent;
+      let os = 'Web';
+      if (/Windows/i.test(ua)) os = 'Windows';
+      else if (/Mac/i.test(ua)) os = 'Mac';
+      else if (/Android/i.test(ua)) os = 'Android';
+      else if (/iPhone|iPad/i.test(ua)) os = 'iOS';
+      else if (/Linux/i.test(ua)) os = 'Linux';
+      return os + ' 浏览器';
+    }
+
+    async function loadClawMe() {
+      if (!clawToken.value) return;
+      try {
+        const me = await api.getMe(clawToken.value);
+        if (me && !me.error) {
+          clawAccount.value = me;
+          // 同步拉取设备列表
+          await loadClawDevices();
+        } else {
+          // Token 失效
+          clawLogout(false);
+        }
+      } catch {
+        clawLogout(false);
+      }
+    }
+
+    async function loadClawDevices() {
+      if (!clawToken.value) return;
+      try {
+        const data = await api.listDevices(clawToken.value);
+        if (data && data.devices) clawDevices.value = data.devices;
+      } catch {}
+    }
+
+    async function clawLogin() {
+      if (!loginUsername.value.trim() || !loginPassword.value) {
+        showToast('请输入用户名和密码', 'error');
+        return;
+      }
+      clawLoggingIn.value = true;
+      try {
+        const r = await api.loginAccount(
+          loginUsername.value.trim(),
+          loginPassword.value,
+          getDeviceId(),
+          getDeviceName()
+        );
+        if (r && r.token) {
+          clawToken.value = r.token;
+          localStorage.setItem('clawToken', r.token);
+          clawAccount.value = r;
+          loginUsername.value = '';
+          loginPassword.value = '';
+          showToast('登录成功，欢迎回来 ' + (r.displayName || r.username), 'success');
+          await loadClawDevices();
+        } else {
+          showToast('登录失败：' + (r?.error || '未知错误'), 'error');
+        }
+      } catch (e) {
+        showToast('登录失败: ' + e.message, 'error');
+      }
+      clawLoggingIn.value = false;
+    }
+
+    async function clawRegister() {
+      if (!regUsername.value.trim() || !regPassword.value) {
+        showToast('请输入用户名和密码', 'error');
+        return;
+      }
+      if (regPassword.value.length < 6) {
+        showToast('密码至少 6 位', 'error');
+        return;
+      }
+      clawRegistering.value = true;
+      try {
+        const r = await api.registerAccount(regUsername.value.trim(), regPassword.value, regDisplayName.value.trim());
+        if (r && r.accountId) {
+          showToast('注册成功，请登录', 'success');
+          authMode.value = 'login';
+          loginUsername.value = regUsername.value.trim();
+          regUsername.value = '';
+          regPassword.value = '';
+          regDisplayName.value = '';
+        } else {
+          showToast('注册失败：' + (r?.error || '未知错误'), 'error');
+        }
+      } catch (e) {
+        showToast('注册失败: ' + e.message, 'error');
+      }
+      clawRegistering.value = false;
+    }
+
+    function clawLogout(showMsg = true) {
+      clawToken.value = '';
+      clawAccount.value = null;
+      clawDevices.value = [];
+      localStorage.removeItem('clawToken');
+      if (showMsg) showToast('已退出登录', 'success');
+    }
+
+    async function revokeClawDevice(deviceId) {
+      if (!clawToken.value) return;
+      if (!confirm('确定要退出此设备吗？如果是当前设备，将同时退出登录。')) return;
+      try {
+        const r = await api.revokeDevice(clawToken.value, deviceId);
+        if (r && !r.error) {
+          showToast('设备已退出', 'success');
+          if (deviceId === getDeviceId()) {
+            clawLogout(false);
+          } else {
+            await loadClawDevices();
+          }
+        } else {
+          showToast('操作失败：' + (r?.error || '未知错误'), 'error');
+        }
+      } catch (e) {
+        showToast('操作失败: ' + e.message, 'error');
+      }
+    }
+
+    async function clawChangePassword() {
+      if (!clawToken.value) return;
+      if (!oldPassword.value || !newPassword.value) {
+        showToast('请填写原密码和新密码', 'error');
+        return;
+      }
+      if (newPassword.value.length < 6) {
+        showToast('新密码至少 6 位', 'error');
+        return;
+      }
+      changingPwd.value = true;
+      try {
+        const r = await api.changePassword(clawToken.value, oldPassword.value, newPassword.value);
+        if (r && !r.error) {
+          showToast('密码修改成功，请重新登录', 'success');
+          oldPassword.value = '';
+          newPassword.value = '';
+          // 改密后所有 Token 失效，自动退出
+          clawLogout(false);
+        } else {
+          showToast('修改失败：' + (r?.error || '原密码错误'), 'error');
+        }
+      } catch (e) {
+        showToast('修改失败: ' + e.message, 'error');
+      }
+      changingPwd.value = false;
+    }
+
+    // 刷新当前账号余额（轮询用）
+    async function refreshClawBalance() {
+      if (!clawToken.value || !clawAccount.value) return;
+      try {
+        const me = await api.getMe(clawToken.value);
+        if (me && !me.error && clawAccount.value) {
+          clawAccount.value.balance = me.balance;
+        }
+      } catch {}
+    }
+
+    onMounted(() => {
+      load();
+      pollTimer = setInterval(loadTransfers, 2000);
+      // 如果已登录，启动时加载账号信息
+      if (clawToken.value) loadClawMe();
+    });
     onUnmounted(() => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } });
 
     return {
@@ -1274,7 +1470,13 @@ const P2PView = {
       offerSongId, offerPeerId, offering, searchSong, doOffer, cancelTask,
       loadTransfers, formatProgress, formatSize,
       balances, chainBlocks, chainHeight, ledgerSize, prunedToIndex,
-      historyDeviceId, history, loadHistory, formatTxType, formatTime
+      historyDeviceId, history, loadHistory, formatTxType, formatTime,
+      // 账号体系
+      clawToken, clawAccount, clawDevices, clawLoggingIn, clawRegistering,
+      loginUsername, loginPassword, regUsername, regPassword, regDisplayName,
+      oldPassword, newPassword, changingPwd, authMode,
+      clawLogin, clawRegister, clawLogout, revokeClawDevice, clawChangePassword,
+      loadClawMe, loadClawDevices, refreshClawBalance, getDeviceId
     };
   },
   template: `
@@ -1292,6 +1494,7 @@ const P2PView = {
         <button class="btn" :class="activeTab === 'search' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'search'">🔍 找歌</button>
         <button class="btn" :class="activeTab === 'transfers' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'transfers'">📦 传输 <span v-if="transfers.length" style="margin-left:4px;opacity:.8;">({{ transfers.length }})</span></button>
         <button class="btn" :class="activeTab === 'ledger' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'ledger'">🐟 小鱼干</button>
+        <button class="btn" :class="activeTab === 'account' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'account'">👤 账号</button>
       </div>
 
       <div v-if="loading" class="loading"><div class="loading-spinner"></div></div>
@@ -1591,6 +1794,144 @@ const P2PView = {
                 <span style="flex:1;color:var(--text-muted);">{{ tx.remark }}</span>
                 <span style="color:var(--text-muted);">{{ formatTime(tx.timestamp) }}</span>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 账号 -->
+      <div v-if="!loading && activeTab === 'account'">
+        <!-- 未登录：登录/注册切换 -->
+        <div v-if="!clawToken" style="max-width:420px;">
+          <div style="display:flex;gap:8px;margin-bottom:20px;">
+            <button class="btn" :class="authMode === 'login' ? 'btn-primary' : 'btn-secondary'" style="flex:1;" @click="authMode = 'login'">登录</button>
+            <button class="btn" :class="authMode === 'register' ? 'btn-primary' : 'btn-secondary'" style="flex:1;" @click="authMode = 'register'">注册新账号</button>
+          </div>
+
+          <!-- 登录表单 -->
+          <div v-if="authMode === 'login'" style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:24px;">
+            <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;">🐾 登录猫爪驿站</h3>
+            <div style="margin-bottom:12px;">
+              <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">用户名</label>
+              <input type="text" v-model="loginUsername" placeholder="3-20 位字符"
+                style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"
+                @keyup.enter="clawLogin" />
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">密码</label>
+              <input type="password" v-model="loginPassword" placeholder="至少 6 位"
+                style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"
+                @keyup.enter="clawLogin" />
+            </div>
+            <button class="btn btn-primary" style="width:100%;" @click="clawLogin" :disabled="clawLoggingIn">
+              {{ clawLoggingIn ? '登录中...' : '登录' }}
+            </button>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6;">
+              💡 每台设备会生成独立 Token，可在多设备同时登录（如 NAS + 手机）。<br/>
+              登录失败 5 次将锁定 15 分钟。
+            </div>
+          </div>
+
+          <!-- 注册表单 -->
+          <div v-else style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:24px;">
+            <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;">✨ 注册猫爪驿站账号</h3>
+            <div style="margin-bottom:12px;">
+              <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">用户名</label>
+              <input type="text" v-model="regUsername" placeholder="3-20 位字符（字母数字下划线）"
+                style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
+            </div>
+            <div style="margin-bottom:12px;">
+              <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">昵称（可选）</label>
+              <input type="text" v-model="regDisplayName" placeholder="展示给其他用户看的名字"
+                style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">密码</label>
+              <input type="password" v-model="regPassword" placeholder="至少 6 位"
+                style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
+            </div>
+            <button class="btn btn-primary" style="width:100%;" @click="clawRegister" :disabled="clawRegistering">
+              {{ clawRegistering ? '注册中...' : '注册（赠送 100 🐟）' }}
+            </button>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6;">
+              🐟 注册赠送 100 小鱼干 · 在线 1 小时奖励 10🐟 · 上传 1GB 奖励 10🐟 · 下载 1GB 消耗 10🐟<br/>
+              🔒 密码使用 PBKDF2-SHA256 加盐哈希存储，即使账本泄露也无法反推密码。
+            </div>
+          </div>
+        </div>
+
+        <!-- 已登录：账号信息 + 设备管理 + 改密 -->
+        <div v-else>
+          <!-- 账号信息卡片 -->
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;gap:16px;">
+              <div style="width:56px;height:56px;border-radius:50%;background:var(--accent-dim);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;">
+                {{ clawAccount?.displayName?.[0] || clawAccount?.username?.[0] || '?' }}
+              </div>
+              <div style="flex:1;">
+                <div style="font-size:18px;font-weight:600;">{{ clawAccount?.displayName || clawAccount?.username }}</div>
+                <div style="font-size:12px;color:var(--text-muted);">@{{ clawAccount?.username }} · 账号 ID #{{ clawAccount?.accountId }}</div>
+              </div>
+              <button class="btn btn-secondary" @click="clawLogout">退出登录</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px;">
+              <div style="background:var(--bg-tertiary);border-radius:8px;padding:12px;text-align:center;">
+                <div style="font-size:11px;color:var(--text-muted);">🐟 小鱼干</div>
+                <div style="font-size:22px;font-weight:700;color:var(--success);margin-top:4px;">{{ clawAccount?.balance ?? 0 }}</div>
+              </div>
+              <div style="background:var(--bg-tertiary);border-radius:8px;padding:12px;text-align:center;">
+                <div style="font-size:11px;color:var(--text-muted);">📱 在线设备</div>
+                <div style="font-size:22px;font-weight:700;margin-top:4px;">{{ clawDevices.length }}</div>
+              </div>
+              <div style="background:var(--bg-tertiary);border-radius:8px;padding:12px;text-align:center;">
+                <div style="font-size:11px;color:var(--text-muted);">🕐 注册时间</div>
+                <div style="font-size:13px;font-weight:600;margin-top:6px;">{{ formatTime(clawAccount?.createdAt ? new Date(clawAccount.createdAt).getTime() : 0) || '-' }}</div>
+              </div>
+            </div>
+            <button class="btn btn-secondary" style="margin-top:12px;font-size:12px;" @click="loadClawMe">⟳ 刷新余额</button>
+          </div>
+
+          <!-- 设备管理 -->
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">📱 设备管理</h3>
+            <div v-if="!clawDevices.length" style="font-size:12px;color:var(--text-muted);padding:8px 0;">暂无设备</div>
+            <div v-else>
+              <div v-for="d in clawDevices" :key="d.deviceId" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
+                <div style="width:32px;height:32px;border-radius:6px;background:var(--accent-dim);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:14px;">
+                  📱
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:13px;font-weight:600;">
+                    {{ d.deviceName || '未命名设备' }}
+                    <span v-if="d.deviceId === getDeviceId()" style="font-size:10px;color:var(--accent);margin-left:6px;padding:2px 6px;background:var(--accent-dim);border-radius:4px;">当前设备</span>
+                  </div>
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                    <code style="color:var(--text-secondary);">{{ d.deviceId.substring(0, 20) }}{{ d.deviceId.length > 20 ? '...' : '' }}</code>
+                    · 最后活跃 {{ formatTime(d.lastActiveAt ? new Date(d.lastActiveAt).getTime() : 0) || '从未' }}
+                  </div>
+                </div>
+                <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" @click="revokeClawDevice(d.deviceId)">退出</button>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6;">
+              💡 每台设备登录后获得独立 Token，互不影响。NAS 挂机与手机下载可同时运行，积分统一计入账号。
+            </div>
+          </div>
+
+          <!-- 修改密码 -->
+          <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">🔑 修改密码</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+              <input type="password" v-model="oldPassword" placeholder="原密码"
+                style="padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
+              <input type="password" v-model="newPassword" placeholder="新密码（至少 6 位）"
+                style="padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
+            </div>
+            <button class="btn btn-primary" @click="clawChangePassword" :disabled="changingPwd">
+              {{ changingPwd ? '修改中...' : '修改密码' }}
+            </button>
+            <div style="font-size:11px;color:var(--warning);margin-top:8px;">
+              ⚠ 修改密码后所有设备 Token 失效，需要重新登录。
             </div>
           </div>
         </div>
