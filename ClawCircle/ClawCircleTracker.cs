@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace CatClawMusicServer.ClawCircle;
 
 /// <summary>
-/// 猫爪圈 tracker 内存在线节点注册表（单例）。
+/// 猫爪驿站 tracker 内存在线节点注册表（单例）。
 /// 线程安全：ConcurrentDictionary 管理节点，每个 WebSocket 发送用独立 SemaphoreSlim 串行，避免并发写帧竞争。
 /// </summary>
 public class ClawCircleTracker
@@ -24,12 +24,22 @@ public class ClawCircleTracker
         return list;
     }
 
+    /// <summary>在线节点 ID + 连接时间（供账本在线奖励使用）。</summary>
+    public List<(string deviceId, DateTime connectedAt)> GetOnlineNodes()
+    {
+        var list = new List<(string, DateTime)>();
+        foreach (var s in _peers.Values)
+            list.Add((s.DeviceId, s.Info.ConnectedAt));
+        return list;
+    }
+
     public PeerInfo? Find(string deviceId)
         => _peers.TryGetValue(deviceId, out var s) ? s.Info : null;
 
     /// <summary>注册或更新一个节点（首次上线 / library 变化时调用）。</summary>
     public PeerInfo Register(string deviceId, string name, WebSocket socket,
-        string? wan = null, int? port = null, bool relayOnly = false, LibrarySummary? library = null)
+        string? wan = null, int? port = null, bool relayOnly = false, LibrarySummary? library = null,
+        System.Net.IPAddress? wsIpAddress = null)
     {
         var info = new PeerInfo
         {
@@ -39,7 +49,8 @@ public class ClawCircleTracker
             Port = port,
             RelayOnly = relayOnly,
             Library = library,
-            ConnectedAt = DateTime.UtcNow
+            ConnectedAt = DateTime.UtcNow,
+            WsIpAddress = wsIpAddress
         };
         var session = new PeerSession
         {

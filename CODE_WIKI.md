@@ -24,7 +24,7 @@
 
 ## 1. 项目概述
 
-**CatClawMusicServer** 是一个自托管的音乐流媒体服务器，定位类似 Navidrome / Jellyfin 的音频子集，并额外内置了「猫爪圈（ClawCircle）」跨网 P2P 音乐共享能力。
+**CatClawMusicServer** 是一个自托管的音乐流媒体服务器，定位类似 Navidrome / Jellyfin 的音频子集，并额外内置了「猫爪驿站（ClawCircle）」跨网 P2P 音乐共享能力。
 
 核心能力：
 
@@ -35,7 +35,7 @@
 - 🎯 智能推荐：基于播放历史的混合推荐引擎（无需外部 ML 模型）
 - 📊 统计：个人统计 + 全服统计 + 每日预聚合
 - 🌐 双协议 API：自有 V1 REST API（JWT）+ Subsonic 兼容 API（`/rest/*`）
-- 🔗 猫爪圈 P2P：WebSocket 信令中转 + STUN NAT 反射 + Kademlia DHT 节点发现 + 分块传输引擎
+- 🔗 猫爪驿站 P2P：WebSocket 信令中转 + STUN NAT 反射 + Kademlia DHT 节点发现 + 分块传输引擎
 - 🖥️ 内置 Web UI（Vue 3 SPA）+ Swagger 文档
 - 🐳 Docker 一键部署 / Windows 自包含 EXE
 
@@ -507,7 +507,7 @@ Song ──┬── SongGenre (N:N) ── Genre (Genre.Name 唯一)
 
 ## 9. ClawCircle P2P 模块
 
-猫爪圈是跨网 P2P 音乐共享功能，服务端扮演 tracker / 信令中转 + DHT 节点 + STUN 反射角色。
+猫爪驿站是跨网 P2P 音乐共享功能，服务端扮演 tracker / 信令中转 + DHT 节点 + STUN 反射角色。
 
 ### 9.1 架构层级
 

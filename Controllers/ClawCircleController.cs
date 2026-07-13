@@ -1,7 +1,10 @@
 using CatClawMusicServer.ClawCircle;
 using CatClawMusicServer.ClawCircle.Dht;
+using CatClawMusicServer.ClawCircle.Ledger;
 using CatClawMusicServer.ClawCircle.Transfer;
+using CatClawMusicServer.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace CatClawMusicServer.Controllers;
 
@@ -13,20 +16,29 @@ public class ClawCircleController : ControllerBase
     private readonly DhtService _dht;
     private readonly DhtOptions _dhtOpts;
     private readonly TransferEngine _transfer;
+    private readonly UdpTransferProtocol _udp;
     private readonly NodeReputation _reputation;
+    private readonly BlockchainLedger _ledger;
+    private readonly IDbContextFactory<ApplicationDbContext> _dbf;
 
     public ClawCircleController(
         ClawCircleTracker tracker,
         DhtService dht,
         DhtOptions dhtOpts,
         TransferEngine transfer,
-        NodeReputation reputation)
+        UdpTransferProtocol udp,
+        NodeReputation reputation,
+        BlockchainLedger ledger,
+        IDbContextFactory<ApplicationDbContext> dbf)
     {
         _tracker = tracker;
         _dht = dht;
         _dhtOpts = dhtOpts;
         _transfer = transfer;
+        _udp = udp;
         _reputation = reputation;
+        _ledger = ledger;
+        _dbf = dbf;
     }
 
     [HttpGet("peers")]
@@ -61,6 +73,21 @@ public class ClawCircleController : ControllerBase
                 trackedNodes = _reputation.All().Count,
                 blacklisted = _reputation.All().Count(kv => kv.Value.Score < NodeReputation.BlacklistThreshold),
                 trusted = _reputation.All().Count(kv => kv.Value.Score >= NodeReputation.TrustedThreshold)
+            },
+            ledger = new
+            {
+                height = _ledger.Height,
+                totalNodes = _ledger.AllBalances().Count,
+                totalSupply = _ledger.AllBalances().Values.Sum(),
+                sizeBytes = _ledger.EstimatedSizeBytes,
+                prunedToIndex = _ledger.PrunedToIndex,
+                rules = new
+                {
+                    currency = "小鱼干 🐟",
+                    initialBalance = BlockchainLedger.InitialBalance,
+                    fishPerHourOnline = BlockchainLedger.FishPerHour,
+                    fishPerGB = BlockchainLedger.FishPerGB
+                }
             }
         });
     }
@@ -101,10 +128,146 @@ public class ClawCircleController : ControllerBase
         return Ok(records);
     }
 
+    // ── 区块链积分账本 ──
+
+    [HttpGet("ledger/balance")]
+    public IActionResult GetBalance([FromQuery] string deviceId)
+    {
+        if (string.IsNullOrEmpty(deviceId))
+            return BadRequest("需要 deviceId 参数");
+        return Ok(new
+        {
+            deviceId,
+            balance = _ledger.GetBalance(deviceId),
+            history = _ledger.GetHistory(deviceId).Take(50)
+        });
+    }
+
+    [HttpGet("ledger/balances")]
+    public IActionResult GetAllBalances()
+    {
+        var balances = _ledger.AllBalances()
+            .OrderByDescending(kv => kv.Value)
+            .Select(kv => new { deviceId = kv.Key, balance = kv.Value })
+            .ToList();
+        return Ok(new { totalNodes = balances.Count, balances });
+    }
+
+    [HttpGet("ledger/chain")]
+    public IActionResult GetChain([FromQuery] int from = 0, [FromQuery] int count = 20)
+    {
+        var chain = _ledger.GetChain();
+        var slice = chain.Skip(from).Take(count).ToList();
+        return Ok(new
+        {
+            height = _ledger.Height,
+            valid = _ledger.ValidateChain(),
+            sizeBytes = _ledger.EstimatedSizeBytes,
+            prunedToIndex = _ledger.PrunedToIndex,
+            blocks = slice
+        });
+    }
+
+    [HttpGet("ledger/history/{deviceId}")]
+    public IActionResult GetHistory(string deviceId)
+    {
+        var history = _ledger.GetHistory(deviceId);
+        return Ok(new
+        {
+            deviceId,
+            balance = _ledger.GetBalance(deviceId),
+            totalTransactions = history.Count,
+            transactions = history.Take(100)
+        });
+    }
+
     [HttpGet("transfers")]
     public IActionResult Transfers()
     {
-        return Ok(new { message = "Transfer engine active" });
+        var list = _udp.GetAllTransfers();
+        return Ok(new
+        {
+            activeCount = list.Count,
+            transfers = list
+        });
+    }
+
+    [HttpGet("transfers/{taskId}")]
+    public IActionResult GetTransfer(string taskId)
+    {
+        var info = _udp.GetTransfer(taskId);
+        if (info == null) return NotFound(new { error = "task not found" });
+        return Ok(info);
+    }
+
+    [HttpPost("transfers/{taskId}/cancel")]
+    public async Task<IActionResult> CancelTransfer(string taskId)
+    {
+        var ok = await _udp.CancelTransferAsync(taskId);
+        return Ok(new { cancelled = ok, taskId });
+    }
+
+    /// <summary>本节点作为发送方：为指定歌曲生成分块清单并注册发送上下文。</summary>
+    [HttpPost("transfers/offer")]
+    public async Task<IActionResult> OfferTransfer([FromBody] OfferTransferRequest req)
+    {
+        if (string.IsNullOrEmpty(req.SongId) || string.IsNullOrEmpty(req.PeerDeviceId))
+            return BadRequest("需要 songId 和 peerDeviceId");
+
+        var peer = _tracker.Find(req.PeerDeviceId);
+        if (peer == null) return NotFound(new { error = "peer not online" });
+        if (_reputation.IsBlacklisted(req.PeerDeviceId))
+            return BadRequest(new { error = "对端节点信誉过低，已被列入黑名单" });
+        if (string.IsNullOrEmpty(peer.Wan) || peer.Port == null)
+            return BadRequest(new { error = "peer 未完成 STUN 反射端点探测" });
+
+        // 从数据库查歌曲文件路径
+        await using var db = await _dbf.CreateDbContextAsync();
+        var song = await db.Songs.FindAsync(long.TryParse(req.SongId, out var sid) ? sid : 0L);
+        if (song == null) return NotFound(new { error = "song not found" });
+        if (string.IsNullOrEmpty(song.FilePath) || !System.IO.File.Exists(song.FilePath))
+            return NotFound(new { error = "song file not found on disk" });
+
+        var manifest = await _transfer.CreateManifestAsync(song.FilePath);
+        var taskId = req.TaskId ?? Guid.NewGuid().ToString("N")[..12];
+        var peerEp = new System.Net.IPEndPoint(System.Net.IPAddress.Parse(peer.Wan!), peer.Port.Value);
+        _udp.RegisterSender(taskId, song.FilePath, req.PeerDeviceId, manifest, peerEp);
+
+        return Ok(new
+        {
+            taskId,
+            manifest,
+            peerEndpoint = new { ip = peer.Wan, port = peer.Port },
+            message = "已注册发送方，等待对端 ChunkRequest"
+        });
+    }
+
+    /// <summary>本节点作为接收方：根据对端发来的清单创建接收任务。</summary>
+    [HttpPost("transfers/receive")]
+    public async Task<IActionResult> ReceiveTransfer([FromBody] ReceiveTransferRequest req)
+    {
+        if (req.Manifest == null || string.IsNullOrEmpty(req.PeerDeviceId) || string.IsNullOrEmpty(req.TaskId))
+            return BadRequest("需要 manifest、peerDeviceId、taskId");
+
+        var peer = _tracker.Find(req.PeerDeviceId);
+        if (peer == null) return NotFound(new { error = "peer not online" });
+        if (_reputation.IsBlacklisted(req.PeerDeviceId))
+            return BadRequest(new { error = "对端节点信誉过低，已被列入黑名单" });
+        if (string.IsNullOrEmpty(peer.Wan) || peer.Port == null)
+            return BadRequest(new { error = "peer 未完成 STUN 反射端点探测" });
+
+        var outputDir = System.IO.Path.Combine("Data", "p2p_downloads");
+        var task = _transfer.CreateReceiveTask(req.Manifest, outputDir);
+        var peerEp = new System.Net.IPEndPoint(System.Net.IPAddress.Parse(peer.Wan!), peer.Port.Value);
+        _udp.RegisterReceiver(req.TaskId, task.Id, req.PeerDeviceId, peerEp);
+
+        return Ok(new
+        {
+            taskId = req.TaskId,
+            engineTaskId = task.Id,
+            outputFile = task.OutputFile,
+            peerEndpoint = new { ip = peer.Wan, port = peer.Port }
+        });
     }
 
     [HttpGet("library/status")]
@@ -186,4 +349,6 @@ public class ClawCircleController : ControllerBase
 
 public record ToggleDhtRequest(bool Enabled);
 public record BootstrapDhtRequest(string Address);
+public record OfferTransferRequest(string SongId, string PeerDeviceId, string? TaskId);
+public record ReceiveTransferRequest(string TaskId, string PeerDeviceId, PieceManifest Manifest);
 
