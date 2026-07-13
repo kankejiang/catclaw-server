@@ -217,6 +217,16 @@ class ApiClient {
     if (size) url += `?size=${size}`;
     return this._withToken(url);
   }
+  getAlbumCoverUrl(id, size) {
+    let url = `${API_BASE}/albums/${id}/cover`;
+    if (size) url += `?size=${size}`;
+    return this._withToken(url);
+  }
+  getArtistCoverUrl(id, size) {
+    let url = `${API_BASE}/artists/${id}/cover`;
+    if (size) url += `?size=${size}`;
+    return this._withToken(url);
+  }
   async getLyrics(id) { return this.get(`/songs/${id}/lyrics`); }
 
   // ── Artists ──

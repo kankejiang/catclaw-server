@@ -143,12 +143,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnMessageReceived = context =>
             {
                 var path = context.HttpContext.Request.Path.Value ?? "";
-                if (path.StartsWith("/api/v1/songs", StringComparison.OrdinalIgnoreCase) ||
-                    path.StartsWith("/api/v1/hls", StringComparison.OrdinalIgnoreCase))
+                if ((path.StartsWith("/api/v1/songs", StringComparison.OrdinalIgnoreCase) ||
+                     path.StartsWith("/api/v1/hls", StringComparison.OrdinalIgnoreCase) ||
+                     path.StartsWith("/api/v1/albums", StringComparison.OrdinalIgnoreCase) ||
+                     path.StartsWith("/api/v1/artists", StringComparison.OrdinalIgnoreCase)) &&
+                    context.Request.Query.TryGetValue("access_token", out var token) &&
+                    !string.IsNullOrEmpty(token))
                 {
-                    var token = context.Request.Query["access_token"].ToString();
-                    if (!string.IsNullOrEmpty(token))
-                        context.Token = token;
+                    context.Token = token!;
                 }
                 return Task.CompletedTask;
             }

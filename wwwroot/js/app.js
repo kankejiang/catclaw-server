@@ -115,12 +115,12 @@ const PlayerBar = {
       document.addEventListener('mouseup', onUp);
     }
 
-    return { store, player, formatTime, onProgressClick, onProgressMouseDown, isFavorite, toggleFavorite };
+    return { store, player, formatTime, onProgressClick, onProgressMouseDown, isFavorite, toggleFavorite, coverUrl: (id) => api.getCoverUrl(id) };
   },
   template: `
     <div class="player-bar">
       <div class="player-cover" @click="store.nowPlayingFull = true">
-        <img v-if="store.currentSong?.album_cover" :src="store.currentSong.album_cover" />
+        <img v-if="store.currentSong?.album_cover" :src="coverUrl(store.currentSong.id)" />
         <div v-else class="player-cover-placeholder">🎵</div>
       </div>
       <div class="player-info">
@@ -258,7 +258,7 @@ const HomeView = {
       if (songs.length > 0) playSong(songs[0], songs, 0);
     }
 
-    return { overview, recentSongs, recommend, playSong, playAll, formatTime, store };
+    return { overview, recentSongs, recommend, playSong, playAll, formatTime, store, coverUrl: (id) => api.getCoverUrl(id) };
   },
   template: `
     <div class="page-content">
@@ -294,7 +294,7 @@ const HomeView = {
         <div class="card-grid">
           <div class="card" v-for="song in recommend" :key="song.id" @click="playSong(song, recommend, recommend.indexOf(song))">
             <div class="card-cover">
-              <img v-if="song.album_cover" :src="'/api/v1/songs/' + song.id + '/cover'" />
+              <img v-if="song.album_cover" :src="coverUrl(song.id)" />
               <div v-else class="card-cover-placeholder">🎵</div>
               <div class="card-cover-overlay"><div class="card-play-btn">▶</div></div>
             </div>
@@ -313,7 +313,7 @@ const HomeView = {
         <div class="card-grid">
           <div class="card" v-for="song in recentSongs" :key="song.id" @click="playSong(song, recentSongs, recentSongs.indexOf(song))">
             <div class="card-cover">
-              <img v-if="song.album_cover" :src="'/api/v1/songs/' + song.id + '/cover'" />
+              <img v-if="song.album_cover" :src="coverUrl(song.id)" />
               <div v-else class="card-cover-placeholder">🎵</div>
               <div class="card-cover-overlay"><div class="card-play-btn">▶</div></div>
             </div>
@@ -427,7 +427,7 @@ const ArtistsView = {
     const totalPages = computed(() => Math.ceil(total.value / pageSize));
     onMounted(load);
 
-    return { artists, total, page, totalPages, loading };
+    return { artists, total, page, totalPages, loading, artistCoverUrl: (id) => api.getArtistCoverUrl(id) };
   },
   template: `
     <div class="page-content">
@@ -438,7 +438,7 @@ const ArtistsView = {
       <div class="card-grid">
         <router-link v-for="a in artists" :key="a.id" :to="'/artists/' + a.id" class="card" style="text-decoration:none;color:inherit;">
           <div class="card-cover">
-            <img v-if="a.cover" :src="a.cover" />
+            <img v-if="a.cover" :src="artistCoverUrl(a.id)" />
             <div v-else class="card-cover-placeholder">🎤</div>
           </div>
           <div class="card-body">
@@ -479,7 +479,7 @@ const AlbumsView = {
     const totalPages = computed(() => Math.ceil(total.value / pageSize));
     onMounted(load);
 
-    return { albums, total, page, totalPages, loading };
+    return { albums, total, page, totalPages, loading, albumCoverUrl: (id) => api.getAlbumCoverUrl(id) };
   },
   template: `
     <div class="page-content">
@@ -490,7 +490,7 @@ const AlbumsView = {
       <div class="card-grid">
         <router-link v-for="a in albums" :key="a.id" :to="'/albums/' + a.id" class="card" style="text-decoration:none;color:inherit;">
           <div class="card-cover">
-            <img v-if="a.cover" :src="a.cover" />
+            <img v-if="a.cover" :src="albumCoverUrl(a.id)" />
             <div v-else class="card-cover-placeholder">💿</div>
           </div>
           <div class="card-body">
@@ -524,7 +524,7 @@ const AlbumDetailView = {
       loading.value = false;
     });
 
-    return { album, loading, playSong, formatTime, store };
+    return { album, loading, playSong, formatTime, store, albumCoverUrl: (id) => api.getAlbumCoverUrl(id) };
   },
   template: `
     <div class="page-content">
@@ -532,7 +532,7 @@ const AlbumDetailView = {
       <div v-else-if="album">
         <div style="display:flex;gap:24px;margin-bottom:24px;">
           <div style="width:200px;height:200px;border-radius:12px;overflow:hidden;background:var(--bg-tertiary);flex-shrink:0;">
-            <img v-if="album.cover" :src="album.cover" style="width:100%;height:100%;object-fit:cover;" />
+            <img v-if="album.cover" :src="albumCoverUrl(album.id)" style="width:100%;height:100%;object-fit:cover;" />
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;font-size:64px;opacity:0.3;">💿</div>
           </div>
           <div>
@@ -582,7 +582,7 @@ const ArtistDetailView = {
       loading.value = false;
     });
 
-    return { artist, songs, albums, loading, playSong, formatTime, store };
+    return { artist, songs, albums, loading, playSong, formatTime, store, artistCoverUrl: (id) => api.getArtistCoverUrl(id), albumCoverUrl: (id) => api.getAlbumCoverUrl(id) };
   },
   template: `
     <div class="page-content">
@@ -590,7 +590,7 @@ const ArtistDetailView = {
       <div v-else-if="artist">
         <div style="display:flex;gap:24px;margin-bottom:24px;align-items:center;">
           <div style="width:160px;height:160px;border-radius:50%;overflow:hidden;background:var(--bg-tertiary);flex-shrink:0;">
-            <img v-if="artist.cover" :src="artist.cover" style="width:100%;height:100%;object-fit:cover;" />
+            <img v-if="artist.cover" :src="artistCoverUrl(artist.id)" style="width:100%;height:100%;object-fit:cover;" />
             <div v-else style="display:flex;align-items:center;justify-content:center;height:100%;font-size:56px;opacity:0.3;">🎤</div>
           </div>
           <div>
@@ -606,7 +606,7 @@ const ArtistDetailView = {
           <div class="card-grid">
             <router-link v-for="a in albums" :key="a.id" :to="'/albums/' + a.id" class="card" style="text-decoration:none;color:inherit;">
               <div class="card-cover">
-                <img v-if="a.cover" :src="a.cover" />
+                <img v-if="a.cover" :src="albumCoverUrl(a.id)" />
                 <div v-else class="card-cover-placeholder">💿</div>
               </div>
               <div class="card-body">
