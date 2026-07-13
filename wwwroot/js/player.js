@@ -3,7 +3,7 @@
  * Supports direct streaming and HLS adaptive bitrate via hls.js
  */
 import { watch } from 'vue';
-import { store, playSong, loadLyrics, showToast } from './store.js';
+import { store, playSong, loadLyrics, flushScrobble, showToast } from './store.js';
 import { api } from './api.js';
 
 class AudioPlayer {
@@ -22,7 +22,10 @@ class AudioPlayer {
     this.audio.preload = 'auto';
 
     this.audio.addEventListener('play', () => { store.isPlaying = true; });
-    this.audio.addEventListener('pause', () => { store.isPlaying = false; });
+    this.audio.addEventListener('pause', () => {
+      // 切歌时设置新 src 会触发 pause，此时不应改变 isPlaying 状态
+      if (!this._loading) store.isPlaying = false;
+    });
     this.audio.addEventListener('ended', () => { this._onEnded(); });
     this.audio.addEventListener('error', (e) => {
       console.error('Audio error:', e);
@@ -56,6 +59,11 @@ class AudioPlayer {
   }
 
   _loadSong(song) {
+    // 保存期望的播放状态 — 设置新 src 会触发 pause 事件，
+    // 导致 store.isPlaying 被置为 false，需在加载完成后恢复
+    const shouldPlay = store.isPlaying;
+    this._loading = true;
+
     // Destroy previous HLS instance
     if (this.hls) {
       this.hls.destroy();
@@ -85,14 +93,16 @@ class AudioPlayer {
           this.hls.destroy();
           this.hls = null;
           this.audio.src = api.getStreamUrl(song.id);
-          this.audio.play().catch(() => {});
+          if (shouldPlay) this.audio.play().catch(() => {});
         }
       });
     } else {
       this.audio.src = api.getStreamUrl(song.id);
     }
 
-    if (store.isPlaying) {
+    this._loading = false;
+    if (shouldPlay) {
+      store.isPlaying = true;  // 恢复期望状态（pause 事件可能已置 false）
       this.audio.play().catch(() => {});
     }
   }
@@ -172,14 +182,21 @@ class AudioPlayer {
     }
   }
 
-  toggleShuffle() {
-    store.shuffle = !store.shuffle;
-  }
-
-  toggleRepeat() {
-    const modes = ['off', 'all', 'one'];
-    const idx = modes.indexOf(store.repeat);
-    store.repeat = modes[(idx + 1) % 3];
+  // 统一播放模式切换：顺序播放 → 单曲循环 → 随机播放 → 顺序播放
+  togglePlayMode() {
+    if (!store.shuffle && store.repeat === 'off') {
+      // 顺序播放 → 单曲循环
+      store.repeat = 'one';
+      store.shuffle = false;
+    } else if (!store.shuffle && store.repeat === 'one') {
+      // 单曲循环 → 随机播放
+      store.repeat = 'off';
+      store.shuffle = true;
+    } else {
+      // 随机播放（或其他）→ 顺序播放
+      store.repeat = 'off';
+      store.shuffle = false;
+    }
   }
 
   toggleStreamMode() {
@@ -193,9 +210,12 @@ class AudioPlayer {
 
   _onEnded() {
     store.isPlaying = false;
+    // 播放结束时提交 scrobble（每首歌仅一次）
+    flushScrobble();
 
     if (store.repeat === 'one') {
       this.audio.currentTime = 0;
+      store.isPlaying = true;
       this.audio.play().catch(() => {});
       return;
     }

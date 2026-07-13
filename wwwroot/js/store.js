@@ -81,26 +81,43 @@ export function addToQueue(song) {
 }
 
 export function playSong(song, queue, index) {
+  // 提交上一首歌的 scrobble（切歌时，基于实际播放时长）
+  _flushScrobble();
+
   store.currentSong = song;
   store.queue = queue || [song];
   store.queueIndex = index ?? 0;
   store.isPlaying = true;
   store.lyrics = null;
   store.currentLyricLine = -1;
+  store._scrobbled = false;  // 重置当前歌曲的 scrobble 标记
 
   // Load lyrics in background
   loadLyrics(song.id);
+}
 
-  // Scrobble previous song if any
-  if (store._scrobbleTimer) {
-    clearTimeout(store._scrobbleTimer);
+/// 提交当前歌曲的 scrobble（播放超过 10 秒才记录，每首歌仅提交一次）
+export function flushScrobble() {
+  if (store._scrobbled) return;
+  const songId = store.currentSong?.id;
+  if (!songId) return;
+  const playedMs = Math.floor((store.currentTime || 0) * 1000);
+  if (playedMs >= 10000) {
+    api.scrobble(songId, playedMs, 'library').catch(() => {});
+    store._scrobbled = true;
   }
-  // Scrobble after 30 seconds
-  store._scrobbleTimer = setTimeout(() => {
-    if (store.currentSong?.id === song.id) {
-      api.scrobble(song.id, 30000, 'library').catch(() => {});
-    }
-  }, 30000);
+}
+
+// 切歌前提交旧歌的 scrobble
+function _flushScrobble() {
+  if (store._scrobbled) return;
+  const songId = store.currentSong?.id;
+  if (!songId) return;
+  const playedMs = Math.floor((store.currentTime || 0) * 1000);
+  if (playedMs >= 10000) {
+    api.scrobble(songId, playedMs, 'library').catch(() => {});
+  }
+  store._scrobbled = true;  // 标记已提交，防止重复
 }
 
 export async function loadLyrics(songId) {
