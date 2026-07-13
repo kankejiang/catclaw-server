@@ -1323,7 +1323,7 @@ const P2PView = {
     async function loadClawMe() {
       if (!clawToken.value) return;
       try {
-        const me = await api.getMe(clawToken.value);
+        const me = await api.getClawMe(clawToken.value);
         if (me && !me.error) {
           clawAccount.value = me;
           // 同步拉取设备列表
@@ -1468,7 +1468,7 @@ const P2PView = {
     async function refreshClawBalance() {
       if (!clawToken.value || !clawAccount.value) return;
       try {
-        const me = await api.getMe(clawToken.value);
+        const me = await api.getClawMe(clawToken.value);
         if (me && !me.error && clawAccount.value) {
           clawAccount.value.balance = me.balance;
         }

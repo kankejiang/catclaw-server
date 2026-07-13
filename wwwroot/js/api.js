@@ -390,7 +390,7 @@ class ApiClient {
     return res.ok ? await res.json() : { error: await res.text() };
   }
 
-  async getMe(token) {
+  async getClawMe(token) {
     return this._getRaw(`/api/clawcircle/account/me?token=${encodeURIComponent(token)}`);
   }
 
