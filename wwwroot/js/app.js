@@ -1825,7 +1825,7 @@ const P2PView = {
             </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">密码</label>
-              <input type="password" v-model="loginPassword" placeholder="至少 6 位（支持中文）"
+              <input type="text" class="pwd-field" v-model="loginPassword" placeholder="至少 6 位（支持中文）"
                 style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"
                 @keyup.enter="clawLogin" />
             </div>
@@ -1853,12 +1853,12 @@ const P2PView = {
             </div>
             <div style="margin-bottom:12px;">
               <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">密码</label>
-              <input type="password" v-model="regPassword" placeholder="至少 6 位（支持中文）"
+              <input type="text" class="pwd-field" v-model="regPassword" placeholder="至少 6 位（支持中文）"
                 style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
             </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;">确认密码</label>
-              <input type="password" v-model="regPasswordConfirm" placeholder="再次输入密码"
+              <input type="text" class="pwd-field" v-model="regPasswordConfirm" placeholder="再次输入密码"
                 style="width:100%;padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"
                 @keyup.enter="clawRegister" />
               <div v-if="regPasswordConfirm && regPassword !== regPasswordConfirm" style="font-size:11px;color:var(--danger);margin-top:4px;">两次输入的密码不一致</div>
@@ -1935,9 +1935,9 @@ const P2PView = {
           <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;">
             <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;">🔑 修改密码</h3>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
-              <input type="password" v-model="oldPassword" placeholder="原密码"
+              <input type="text" class="pwd-field" v-model="oldPassword" placeholder="原密码"
                 style="padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
-              <input type="password" v-model="newPassword" placeholder="新密码（至少 6 位，支持中文）"
+              <input type="text" class="pwd-field" v-model="newPassword" placeholder="新密码（至少 6 位，支持中文）"
                 style="padding:10px 12px;border-radius:6px;border:1px solid var(--border-light);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;" />
             </div>
             <button class="btn btn-primary" @click="clawChangePassword" :disabled="changingPwd">
@@ -2248,7 +2248,7 @@ const LoginView = {
         </div>
         <div class="form-group">
           <label>密码</label>
-          <input type="password" v-model="password" placeholder="至少6位" @keyup.enter="handleSubmit" />
+          <input type="text" class="pwd-field" v-model="password" placeholder="至少6位" @keyup.enter="handleSubmit" />
         </div>
 
         <button class="btn btn-primary" style="width:100%;padding:12px;font-size:15px;margin-top:8px;" :disabled="loading" @click="handleSubmit">
