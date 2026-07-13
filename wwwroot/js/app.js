@@ -4,7 +4,7 @@
  */
 import { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { createRouter, createWebHashHistory } from 'vue-router';
-import { store, login, logout, loadUser, loadOverview, playSong, addToQueue, toggleFavorite, isFavorite, showToast, formatTime, formatDuration } from './store.js';
+import { store, login, logout, loadUser, loadOverview, playSong, addToQueue, toggleFavorite, isFavorite, flushScrobble, showToast, formatTime, formatDuration } from './store.js';
 import { api } from './api.js';
 import { player } from './player.js';
 
@@ -115,7 +115,19 @@ const PlayerBar = {
       document.addEventListener('mouseup', onUp);
     }
 
-    return { store, player, formatTime, onProgressClick, onProgressMouseDown, isFavorite, toggleFavorite, coverUrl: (id) => api.getCoverUrl(id) };
+    // 播放模式图标与标题（顺序播放 → 单曲循环 → 随机播放）
+    const playModeIcon = computed(() => {
+      if (store.shuffle) return '🔀';
+      if (store.repeat === 'one') return '🔂';
+      return '➡️';
+    });
+    const playModeTitle = computed(() => {
+      if (store.shuffle) return '随机播放（点击切换：顺序播放）';
+      if (store.repeat === 'one') return '单曲循环（点击切换：随机播放）';
+      return '顺序播放（点击切换：单曲循环）';
+    });
+
+    return { store, player, formatTime, onProgressClick, onProgressMouseDown, isFavorite, toggleFavorite, playModeIcon, playModeTitle, coverUrl: (id) => api.getCoverUrl(id) };
   },
   template: `
     <div class="player-bar">
@@ -128,12 +140,17 @@ const PlayerBar = {
         <div class="player-artist">{{ store.currentSong?.artist || '' }}</div>
       </div>
       <div class="player-controls">
-        <button class="player-btn" :class="{ active: store.shuffle }" @click="player.toggleShuffle()" title="随机">🔀</button>
+        <button class="player-btn" :class="{ active: store.currentSong && isFavorite(store.currentSong.id) }"
+          :disabled="!store.currentSong"
+          @click="store.currentSong && toggleFavorite(store.currentSong.id)"
+          :title="store.currentSong ? (isFavorite(store.currentSong.id) ? '取消收藏' : '收藏') : '收藏'">
+          {{ (store.currentSong && isFavorite(store.currentSong.id)) ? '❤️' : '🤍' }}
+        </button>
         <button class="player-btn" @click="player.prev()" title="上一首">⏮</button>
         <button class="player-btn play-pause" @click="player.toggle()">{{ store.isPlaying ? '⏸' : '▶' }}</button>
         <button class="player-btn" @click="player.next()" title="下一首">⏭</button>
-        <button class="player-btn" :class="{ active: store.repeat !== 'off' }" @click="player.toggleRepeat()" :title="'循环: ' + store.repeat">
-          {{ store.repeat === 'one' ? '🔂' : '🔁' }}
+        <button class="player-btn" :class="{ active: store.shuffle || store.repeat !== 'off' }" @click="player.togglePlayMode()" :title="playModeTitle">
+          {{ playModeIcon }}
         </button>
       </div>
       <div class="player-progress">
@@ -144,9 +161,6 @@ const PlayerBar = {
         <span class="player-time">{{ formatTime(store.duration) }}</span>
       </div>
       <div class="player-extra">
-        <button class="btn-icon" v-if="store.currentSong" :class="{ active: isFavorite(store.currentSong.id) }" @click="toggleFavorite(store.currentSong.id)">
-          {{ isFavorite(store.currentSong.id) ? '❤️' : '🤍' }}
-        </button>
         <button class="btn-icon" :class="{ active: store.showLyrics }" @click="store.showLyrics = !store.showLyrics" title="歌词">📝</button>
         <button class="btn-icon" @click="player.toggleStreamMode()" :title="store.streamMode === 'hls' ? 'HLS模式' : '直连模式'">
           <span class="player-quality">{{ store.streamMode === 'hls' ? 'HLS' : 'RAW' }}</span>
@@ -2303,6 +2317,10 @@ const App = {
         loadOverview();
       }
       player.init();
+      // 页面关闭时提交当前歌曲的 scrobble（使用 sendBeacon 确保请求发出）
+      window.addEventListener('beforeunload', () => {
+        flushScrobble();
+      });
     });
 
     // Watch auth state and redirect to login if needed
