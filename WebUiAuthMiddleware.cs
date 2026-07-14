@@ -36,18 +36,10 @@ public class WebUiAuthMiddleware
         bool isLoginPage = path.EndsWith("/login.html", StringComparison.OrdinalIgnoreCase);
         bool isRegisterPage = path.EndsWith("/register.html", StringComparison.OrdinalIgnoreCase);
 
-        // 注册页：未配置时放行，已配置 → 跳登录
+        // register.html 已合并到 login.html，统一重定向
         if (isRegisterPage)
         {
-            if (!store.IsConfigured)
-            {
-                AddNoCacheHeaders(context);
-                await _next(context);
-            }
-            else
-            {
-                await ForceRedirect(context, "/login.html");
-            }
+            await ForceRedirect(context, "/login.html");
             return;
         }
 
@@ -72,10 +64,10 @@ public class WebUiAuthMiddleware
             return;
         }
 
-        // 管理员尚未注册 → 引导去注册页
+        // 管理员尚未注册 → 引导去登录页（登录页会自动显示注册表单）
         if (!store.IsConfigured)
         {
-            await ForceRedirect(context, "/register.html");
+            await ForceRedirect(context, "/login.html");
             return;
         }
 
