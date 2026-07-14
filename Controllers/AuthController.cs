@@ -1,4 +1,6 @@
+using CatClawMusicServer.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace CatClawMusicServer.Controllers;
 
@@ -7,14 +9,27 @@ namespace CatClawMusicServer.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly AdminCredentialStore _store;
+    private readonly IDbContextFactory<ApplicationDbContext> _dbf;
 
-    public AuthController(AdminCredentialStore store) => _store = store;
+    public AuthController(AdminCredentialStore store, IDbContextFactory<ApplicationDbContext> dbf)
+    {
+        _store = store;
+        _dbf = dbf;
+    }
+
+    // 检查是否已配置（旧系统 AdminCredentialStore 或 数据库 Users 任一存在即视为已配置）
+    private async Task<bool> IsAlreadyConfiguredAsync()
+    {
+        if (_store.IsConfigured) return true;
+        await using var db = await _dbf.CreateDbContextAsync();
+        return await db.Users.AnyAsync();
+    }
 
     // POST /api/auth/register — 仅首次（未配置管理员时）可用
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req)
     {
-        if (_store.IsConfigured)
+        if (await IsAlreadyConfiguredAsync())
             return BadRequest(new { message = "管理员已注册，请直接登录" });
 
         if (string.IsNullOrWhiteSpace(req.Username) || req.Username.Length < 2)
@@ -33,13 +48,20 @@ public class AuthController : ControllerBase
 
     // POST /api/auth/login
     [HttpPost("login")]
-    public IActionResult Login([FromBody] LoginRequest req)
+    public async Task<IActionResult> Login([FromBody] LoginRequest req)
     {
-        if (!_store.IsConfigured)
+        if (!await IsAlreadyConfiguredAsync())
             return Unauthorized(new { message = "尚未注册管理员，请先注册" });
 
-        if (req.Username == _store.AdminUser && req.Password == _store.AdminPassword)
+        // 优先用旧系统凭据校验
+        if (_store.IsConfigured && req.Username == _store.AdminUser && req.Password == _store.AdminPassword)
             return SetSessionAndOk(_store.AdminUser);
+
+        // 回退到数据库 Users 校验（BCrypt）
+        await using var db = await _dbf.CreateDbContextAsync();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Username == req.Username);
+        if (user != null && BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
+            return SetSessionAndOk(user.Username);
 
         return Unauthorized(new { message = "用户名或密码错误" });
     }
@@ -59,10 +81,11 @@ public class AuthController : ControllerBase
 
     // GET /api/auth/status
     [HttpGet("status")]
-    public IActionResult Status()
+    public async Task<IActionResult> Status()
     {
+        var configured = await IsAlreadyConfiguredAsync();
         var session = Request.Cookies["catclaw_session"];
-        var loggedIn = _store.IsConfigured
+        var loggedIn = configured
             ? session == _store.AccessToken
             : true; // 未配置管理员时全部放行
 
@@ -70,7 +93,7 @@ public class AuthController : ControllerBase
         {
             loggedIn,
             user = _store.AdminUser,
-            configured = _store.IsConfigured
+            configured
         });
     }
 

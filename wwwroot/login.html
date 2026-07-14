@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>登录 - CatClaw Music Server</title>
+<title>CatClaw Music Server</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
@@ -17,21 +17,19 @@ body {
     background:#1a1a2e;
     padding:40px 36px;
     border-radius:16px;
-    width:360px;
+    width:380px;
     max-width:90vw;
     box-shadow:0 8px 32px rgba(0,0,0,0.4);
 }
 .card h2 {
     color:#00d4ff;
     text-align:center;
-    margin-bottom:28px;
+    margin-bottom:6px;
     font-size:22px;
 }
-.field { margin-bottom:18px; }
-.field label {
-    display:block; font-size:13px; color:#888;
-    margin-bottom:6px;
-}
+.card .sub { text-align:center; color:#888; font-size:13px; margin-bottom:24px; }
+.field { margin-bottom:16px; }
+.field label { display:block; font-size:13px; color:#888; margin-bottom:6px; }
 .field input {
     width:100%; padding:10px 14px;
     border-radius:8px; border:1px solid #333;
@@ -47,35 +45,87 @@ body {
     transition:opacity 0.2s;
 }
 .btn:hover { opacity:0.85; }
+.btn:disabled { opacity:0.5; cursor:not-allowed; }
 .msg { text-align:center; margin-top:14px; font-size:13px; color:#f66; min-height:20px; }
 .msg.ok { color:#0f6; }
-.reg-link { text-align:center; margin-top:16px; font-size:13px; color:#888; line-height:1.6; }
-.reg-link code { background:#0f0f23; padding:2px 8px; border-radius:4px; color:#00d4ff; border:1px solid #333; }
+.hint { text-align:center; margin-top:16px; font-size:12px; color:#666; line-height:1.6; }
+.hint code { background:#0f0f23; padding:2px 8px; border-radius:4px; color:#00d4ff; border:1px solid #333; }
 /* 密码字段用 text-security 替代 type="password"，支持中文输入法 */
 .pwd-field { -webkit-text-security: disc; -moz-text-security: disc; text-security: disc; }
+.loading { text-align:center; color:#888; padding:20px; }
 </style>
 </head>
 <body>
 <div class="card">
     <h2>CatClaw Music Server</h2>
-    <div class="field">
-        <label>用户名</label>
-        <input type="text" id="username" placeholder="admin" autocomplete="username">
+    <div class="sub" id="subtitle">正在检查…</div>
+
+    <!-- 登录表单 -->
+    <div id="loginForm" style="display:none;">
+        <div class="field">
+            <label>用户名</label>
+            <input type="text" id="loginUser" placeholder="admin" autocomplete="username">
+        </div>
+        <div class="field">
+            <label>密码</label>
+            <input type="text" class="pwd-field" id="loginPass" placeholder="输入密码（支持中文）" autocomplete="current-password">
+        </div>
+        <button class="btn" onclick="doLogin()">登 录</button>
+        <div class="msg" id="loginMsg"></div>
+        <div class="hint">忘记密码？请在服务端控制台执行 <code>claw reset</code> 重置账号</div>
     </div>
-    <div class="field">
-        <label>密码</label>
-        <input type="text" class="pwd-field" id="password" placeholder="输入密码（支持中文）" autocomplete="current-password">
+
+    <!-- 注册表单（首次启动） -->
+    <div id="registerForm" style="display:none;">
+        <div class="field">
+            <label>用户名</label>
+            <input type="text" id="regUser" placeholder="admin" autocomplete="off">
+        </div>
+        <div class="field">
+            <label>密码</label>
+            <input type="text" class="pwd-field" id="regPass" placeholder="至少 4 个字符（支持中文）" autocomplete="new-password">
+        </div>
+        <div class="field">
+            <label>确认密码</label>
+            <input type="text" class="pwd-field" id="regPass2" placeholder="再次输入密码" autocomplete="new-password">
+        </div>
+        <button class="btn" onclick="doRegister()">创 建 管 理 员</button>
+        <div class="msg" id="regMsg"></div>
+        <div class="hint">首次启动，请创建管理员账号以开始使用</div>
     </div>
-    <button class="btn" onclick="doLogin()">登 录</button>
-    <div class="msg" id="msg"></div>
-    <div class="reg-link">忘记密码？请在服务端控制台执行 <code>claw reset</code> 重置账号</div>
+
+    <div class="loading" id="loading">正在检查系统状态…</div>
 </div>
 
 <script>
+async function init() {
+    try {
+        const r = await fetch('/api/auth/status');
+        const j = await r.json();
+        document.getElementById('loading').style.display = 'none';
+
+        if (j.configured) {
+            // 已有管理员 → 显示登录表单
+            document.getElementById('subtitle').textContent = '请登录以继续';
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('loginUser').focus();
+        } else {
+            // 未配置 → 显示注册表单
+            document.getElementById('subtitle').textContent = '首次使用，请创建管理员账号';
+            document.getElementById('registerForm').style.display = 'block';
+            document.getElementById('regUser').focus();
+        }
+    } catch {
+        document.getElementById('loading').textContent = '无法连接服务器，请刷新重试';
+    }
+}
+init();
+
+// ── 登录 ──
 async function doLogin() {
-    const u = document.getElementById('username').value.trim();
-    const p = document.getElementById('password').value.trim();
-    const msg = document.getElementById('msg');
+    const u = document.getElementById('loginUser').value.trim();
+    const p = document.getElementById('loginPass').value.trim();
+    const msg = document.getElementById('loginMsg');
     msg.textContent = ''; msg.className = 'msg';
     if (!u || !p) { msg.textContent = '请输入用户名和密码'; return; }
     try {
@@ -96,9 +146,47 @@ async function doLogin() {
         msg.textContent = '网络错误，请重试';
     }
 }
-document.getElementById('password').addEventListener('keydown', e => {
-    if (e.key === 'Enter') doLogin();
-});
+
+// ── 注册（首次） ──
+async function doRegister() {
+    const u = document.getElementById('regUser').value.trim();
+    const p = document.getElementById('regPass').value.trim();
+    const p2 = document.getElementById('regPass2').value.trim();
+    const msg = document.getElementById('regMsg');
+    msg.textContent = ''; msg.className = 'msg';
+
+    if (!u) { msg.textContent = '请输入用户名'; return; }
+    if (u.length < 2) { msg.textContent = '用户名至少 2 个字符'; return; }
+    if (!p) { msg.textContent = '请输入密码'; return; }
+    if (p.length < 4) { msg.textContent = '密码至少 4 个字符'; return; }
+    if (p !== p2) { msg.textContent = '两次密码不一致'; return; }
+
+    try {
+        const res = await fetch('/api/auth/register', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ username:u, password:p })
+        });
+        const j = await res.json();
+        if (res.ok) {
+            msg.className = 'msg ok';
+            msg.textContent = '注册成功，跳转中…';
+            setTimeout(() => location.href = '/', 500);
+        } else {
+            msg.textContent = j.message || '注册失败';
+            // 已有管理员 → 切换到登录表单
+            if (j.message && j.message.includes('已注册')) {
+                setTimeout(() => location.reload(), 1500);
+            }
+        }
+    } catch {
+        msg.textContent = '网络错误，请重试';
+    }
+}
+
+// Enter 键提交
+document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('regPass2').addEventListener('keydown', e => { if (e.key === 'Enter') doRegister(); });
 </script>
 </body>
 </html>
