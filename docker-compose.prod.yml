@@ -22,9 +22,6 @@ services:
       Streaming__HlsEnabled: "true"
       Streaming__FFmpegPath: /usr/bin/ffmpeg
       Streaming__TranscodeDir: /data/transcode
-      # ── P2P（DHT 默认启用，种子节点 nas.08102516.xyz:37825）──
-      ClawCircle__DhtEnabled: "true"
-      ClawCircle__DhtPort: "37825"
     volumes:
       - /mnt/media/music:/music          # ← 改成你的音乐目录
       - ./catclaw-data:/data

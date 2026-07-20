@@ -1,8 +1,4 @@
 using CatClawMusicServer;
-using CatClawMusicServer.ClawCircle;
-using CatClawMusicServer.ClawCircle.Dht;
-using CatClawMusicServer.ClawCircle.Ledger;
-using CatClawMusicServer.ClawCircle.Transfer;
 using CatClawMusicServer.Data;
 using CatClawMusicServer.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -58,56 +54,6 @@ builder.Services.AddSingleton(new ServerAuthOptions { AccessToken = accessToken,
 // 管理员凭据持久化存储（首次启动从 appsettings 读，注册后写入 Data/admin.json）
 builder.Services.AddSingleton<AdminCredentialStore>(sp =>
     new AdminCredentialStore(sp.GetRequiredService<ServerAuthOptions>(), dbPath));
-
-// 猫爪驿站 P2P tracker 在线节点注册表（单例）
-builder.Services.AddSingleton<ClawCircleTracker>();
-builder.Services.AddSingleton<NodeReputation>();
-builder.Services.AddSingleton<TransferEngine>();
-builder.Services.AddSingleton<UdpTransferProtocol>();
-builder.Services.AddSingleton<BlockchainLedger>();
-builder.Services.AddSingleton<CatClawMusicServer.ClawCircle.Accounts.AccountService>();
-
-// DHT 配置
-var dhtSection = builder.Configuration.GetSection("ClawCircle");
-var dhtOpts = new DhtOptions
-{
-    Enabled = bool.TryParse(dhtSection["DhtEnabled"], out var de) && de,
-    Port = int.TryParse(dhtSection["DhtPort"], out var dp) ? dp : 37825,
-    NodeIdSeed = dhtSection["NodeIdSeed"] ?? ""
-};
-
-// NodeIdSeed 持久化：配置为空时首次启动随机生成并保存到 Data/node_id.txt，
-// 避免所有部署共享相同 NodeId 导致 DHT 路由错乱。
-if (string.IsNullOrEmpty(dhtOpts.NodeIdSeed) || dhtOpts.NodeIdSeed == "catclaw-default-node")
-{
-    var nodeIdFile = Path.Combine(Path.GetDirectoryName(dbPath)!, "node_id.txt");
-    if (File.Exists(nodeIdFile))
-    {
-        dhtOpts.NodeIdSeed = File.ReadAllText(nodeIdFile).Trim();
-    }
-    else
-    {
-        // 首次启动：生成随机种子并持久化
-        var bytes = new byte[32];
-        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
-        dhtOpts.NodeIdSeed = Convert.ToHexString(bytes);
-        await File.WriteAllTextAsync(nodeIdFile, dhtOpts.NodeIdSeed);
-        Console.WriteLine($"[clawcircle] 首次启动生成 NodeIdSeed 并持久化到 {nodeIdFile}");
-    }
-}
-
-var bootstrapStr = dhtSection["BootstrapNodes"];
-if (!string.IsNullOrEmpty(bootstrapStr))
-    dhtOpts.BootstrapNodes = bootstrapStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-else
-    dhtOpts.BootstrapNodes = new List<string>(); // 不再硬编码开发者域名
-builder.Services.AddSingleton(dhtOpts);
-builder.Services.AddSingleton<DhtService>(sp =>
-    new DhtService(
-        sp.GetRequiredService<DhtOptions>(),
-        sp.GetRequiredService<ILogger<DhtService>>(),
-        sp.GetRequiredService<ILogger<RoutingTable>>(),
-        sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>()));
 
 // ── JWT 认证配置 ──
 var jwtSection = builder.Configuration.GetSection("Jwt");
@@ -267,8 +213,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
-app.UseWebSockets();  // 启用 WebSocket 升级处理（ClawCircle 信令依赖）
-app.UseMiddleware<ClawCircleWebSocketMiddleware>(); // 猫爪驿站 WebSocket 信令（拦截 /ws/clawcircle，自带 token 鉴权）
 app.UseMiddleware<ApiAuthMiddleware>();   // 内网鉴权（/api 与 /rest）
 app.UseMiddleware<WebUiAuthMiddleware>(); // Web UI 静态页面鉴权（cookie 登录，未登录跳 login.html）
 app.UseDefaultFiles();   // 支持 index.html 默认文件
@@ -286,57 +230,6 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     db.Database.EnsureCreated();
-}
-
-// ── 启动猫爪驿站 STUN（UDP 反射端点探测 + P2P 传输多路复用，端口 = HTTP 端口 + 1）──
-var stunPort = (cliPort ?? ParsePort(config["Kestrel:EndPoints:HttpV4:Url"] ?? config["ASPNETCORE_URLS"] ?? "") ?? 37823) + 1;
-var stunService = new CatClawMusicServer.ClawCircle.ClawCircleStunService(
-    app.Services.GetRequiredService<CatClawMusicServer.ClawCircle.ClawCircleTracker>(),
-    stunPort,
-    app.Services.GetRequiredService<CatClawMusicServer.ClawCircle.Transfer.UdpTransferProtocol>());
-stunService.Start();
-app.Lifetime.ApplicationStopping.Register(() => stunService.Stop());
-
-// ── 定时清理：信誉记录（30 天未见）+ 过期传输任务（2 小时）（每 30 分钟）──
-var repCleanup = app.Services.GetRequiredService<NodeReputation>();
-var engCleanup = app.Services.GetRequiredService<TransferEngine>();
-var cleanTimer = new System.Threading.Timer(_ =>
-{
-    try { repCleanup.Cleanup(); } catch { }
-    try { engCleanup.Cleanup(TimeSpan.FromHours(2)); } catch { }
-}, null, TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30));
-app.Lifetime.ApplicationStopping.Register(() => cleanTimer.Dispose());
-
-// ── 启动区块链积分账本（定时出块 + 在线奖励 + 修剪）──
-var ledger = app.Services.GetRequiredService<BlockchainLedger>();
-var trackerForLedger = app.Services.GetRequiredService<ClawCircleTracker>();
-var accountServiceForLedger = app.Services.GetRequiredService<CatClawMusicServer.ClawCircle.Accounts.AccountService>();
-ledger.SetOnlineNodesProvider(() => trackerForLedger.GetOnlineNodes());
-// 注入 deviceId → accountId 解析器（异步，账本通过此回调将设备传输记账归到账号）
-ledger.SetDeviceAccountResolver(async deviceId =>
-{
-    var acc = await accountServiceForLedger.FindByDeviceIdAsync(deviceId);
-    return acc?.Id;
-});
-ledger.Start();
-app.Lifetime.ApplicationStopping.Register(() => ledger.Stop());
-
-// ── 启动 DHT 服务（可选，Kademlia 去中心化节点发现）──
-var dhtOptions = app.Services.GetRequiredService<DhtOptions>();
-if (dhtOptions.Enabled)
-{
-    var dhtService = app.Services.GetRequiredService<DhtService>();
-    dhtService.Start();
-    app.Lifetime.ApplicationStopping.Register(() => dhtService.Stop());
-
-    // Bootstrap 连接（支持域名和 IP）
-    foreach (var bootstrap in dhtOptions.BootstrapNodes)
-    {
-        if (!string.IsNullOrEmpty(bootstrap))
-        {
-            _ = dhtService.BootstrapFromAddressAsync(bootstrap);
-        }
-    }
 }
 
 app.Run();
