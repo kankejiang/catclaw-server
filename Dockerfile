@@ -32,16 +32,10 @@ ENV Streaming__FFmpegPath=/usr/bin/ffmpeg
 ENV Streaming__TranscodeCacheSizeGB=2
 ENV Streaming__TranscodeDir=/data/transcode
 
-# ── ClawCircle P2P ──
-ENV ClawCircle__DhtEnabled=true
-ENV ClawCircle__DhtPort=37825
-
 # 音量卷：音乐库 + 数据持久化
 VOLUME ["/music", "/data"]
 
-# HTTP + STUN（NAT 打洞）+ DHT（节点发现）
+# HTTP
 EXPOSE 37823
-EXPOSE 37824/udp
-EXPOSE 37825/udp
 
 ENTRYPOINT ["dotnet", "CatClawMusicServer.dll"]
