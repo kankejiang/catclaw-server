@@ -210,7 +210,15 @@ class ApiClient {
     const sep = url.includes('?') ? '&' : '?';
     return `${url}${sep}access_token=${encodeURIComponent(this.accessToken)}`;
   }
-  getStreamUrl(id) { return this._withToken(`${API_BASE}/songs/${id}/stream`); }
+  // stream 可选转码/码率参数（音质偏好）
+  getStreamUrl(id, opts = {}) {
+    let url = `${API_BASE}/songs/${id}/stream`;
+    const params = [];
+    if (opts.transcode && opts.transcode !== 'off') params.push(`transcode=${opts.transcode}`);
+    if (opts.bitrate && opts.bitrate > 0) params.push(`bitrate=${opts.bitrate}`);
+    if (params.length) url += '?' + params.join('&');
+    return this._withToken(url);
+  }
   getHlsUrl(id) { return this._withToken(`${API_BASE}/hls/${id}/master.m3u8`); }
   getCoverUrl(id, size) {
     let url = `${API_BASE}/songs/${id}/cover`;

@@ -1,13 +1,30 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CatClaw Music</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+
+  <!-- 主题初始化（避免闪烁）：在 CSS 加载前同步设置 data-theme -->
+  <script>
+    (function () {
+      try {
+        var prefs = JSON.parse(localStorage.getItem('catclaw_prefs') || '{}');
+        var theme = prefs.theme || 'dark';
+        var resolved = theme;
+        if (theme === 'system') {
+          resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+        document.documentElement.setAttribute('data-theme', resolved);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
 
   <!-- Import Map for ES Modules -->
   <script type="importmap">
@@ -26,21 +43,21 @@
   <style>
     #app-loader {
       position: fixed; inset: 0; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; background: #0a0a0f;
-      color: #9090a8; font-family: 'Inter', sans-serif; z-index: 9999;
+      align-items: center; justify-content: center; background: var(--bg-0);
+      color: var(--text-2); font-family: 'Inter', sans-serif; z-index: 9999;
       transition: opacity 0.3s ease;
     }
     #app-loader.hidden { opacity: 0; pointer-events: none; }
     #app-loader .spinner {
-      width: 36px; height: 36px; border: 3px solid #2a2a42;
-      border-top-color: #00d4ff; border-radius: 50%;
+      width: 36px; height: 36px; border: 3px solid var(--bg-4);
+      border-top-color: var(--accent); border-radius: 50%;
       animation: spin 0.8s linear infinite; margin-bottom: 16px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     #app-error {
       position: fixed; bottom: 20px; left: 20px; right: 20px;
-      background: #1a1a28; border: 1px solid #ff4757; border-radius: 8px;
-      padding: 12px 16px; color: #ff4757; font-family: monospace; font-size: 13px;
+      background: var(--bg-2); border: 1px solid var(--danger); border-radius: 8px;
+      padding: 12px 16px; color: var(--danger); font-family: monospace; font-size: 13px;
       z-index: 10000; display: none; max-height: 200px; overflow-y: auto;
     }
   </style>

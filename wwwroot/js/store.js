@@ -5,6 +5,32 @@
 import { reactive, watch } from 'vue';
 import { api } from './api.js';
 
+// ── 持久化偏好（localStorage）──
+const PREFS_KEY = 'catclaw_prefs';
+
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return {};
+}
+
+function savePrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({
+      theme: store.theme,
+      streamMode: store.streamMode,
+      streamTranscode: store.streamTranscode,
+      streamBitrate: store.streamBitrate,
+      notifyOnNewSong: store.notifyOnNewSong,
+      volume: store.volume
+    }));
+  } catch { /* ignore */ }
+}
+
+const prefs = loadPrefs();
+
 export const store = reactive({
   // Auth
   user: null,
@@ -21,18 +47,24 @@ export const store = reactive({
   progress: 0,       // 0-1
   currentTime: 0,    // seconds
   duration: 0,       // seconds
-  volume: 0.8,
+  volume: prefs.volume ?? 0.8,
   isMuted: false,
   shuffle: false,
   repeat: 'off',     // 'off' | 'all' | 'one'
-  streamMode: 'direct', // 'direct' | 'hls'
+  streamMode: prefs.streamMode || 'direct', // 'direct' | 'hls'
+  streamTranscode: prefs.streamTranscode || 'off', // 'off' | 'mp3' | 'aac' | 'opus'
+  streamBitrate: prefs.streamBitrate || 0, // 0 = 原码率, 128/192/320
 
   // UI
   showLyrics: false,
   showQueue: false,
   nowPlayingFull: false,
-  sidebarCollapsed: false,
+  sidebarCollapsed: localStorage.getItem('catclaw_sidebar_collapsed') === '1',
   searchQuery: '',
+
+  // Preferences
+  theme: prefs.theme || 'dark', // 'dark' | 'light' | 'system'
+  notifyOnNewSong: prefs.notifyOnNewSong ?? false,
 
   // Lyrics
   lyrics: null,
@@ -42,7 +74,46 @@ export const store = reactive({
   favoriteIds: new Set(),
 
   // Toast notifications
-  toasts: []
+  toasts: [],
+
+  // scrobble
+  _scrobbled: false
+});
+
+// ── 主题应用 ──
+export function applyTheme(theme) {
+  let resolved = theme;
+  if (theme === 'system') {
+    resolved = window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  document.documentElement.setAttribute('data-theme', resolved);
+}
+
+applyTheme(store.theme);
+
+export function setTheme(theme) {
+  store.theme = theme;
+  applyTheme(theme);
+  savePrefs();
+}
+
+watch(() => store.volume, () => savePrefs());
+watch(() => store.streamMode, () => savePrefs());
+watch(() => store.streamTranscode, () => savePrefs());
+watch(() => store.streamBitrate, () => savePrefs());
+
+// 监听系统主题变化（system 模式）
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+    if (store.theme === 'system') {
+      applyTheme('system');
+    }
+  });
+}
+
+// ── 侧边栏折叠持久化 ──
+watch(() => store.sidebarCollapsed, (v) => {
+  localStorage.setItem('catclaw_sidebar_collapsed', v ? '1' : '0');
 });
 
 // ── Actions ──
@@ -146,7 +217,7 @@ export function isFavorite(songId) {
 }
 
 export function showToast(message, type = 'info') {
-  const toast = { id: Date.now(), message, type };
+  const toast = { id: Date.now() + Math.random(), message, type };
   store.toasts.push(toast);
   setTimeout(() => {
     const idx = store.toasts.indexOf(toast);

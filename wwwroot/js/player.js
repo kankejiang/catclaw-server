@@ -92,12 +92,12 @@ class AudioPlayer {
           console.warn('HLS fatal error, falling back to direct stream');
           this.hls.destroy();
           this.hls = null;
-          this.audio.src = api.getStreamUrl(song.id);
+          this.audio.src = api.getStreamUrl(song.id, { transcode: store.streamTranscode, bitrate: store.streamBitrate });
           if (shouldPlay) this.audio.play().catch(() => {});
         }
       });
     } else {
-      this.audio.src = api.getStreamUrl(song.id);
+      this.audio.src = api.getStreamUrl(song.id, { transcode: store.streamTranscode, bitrate: store.streamBitrate });
     }
 
     this._loading = false;
