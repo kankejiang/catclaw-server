@@ -24,3 +24,12 @@ Data/covers/
 
 # WorkBuddy
 .workbuddy/
+
+# AI 工具本地记忆/产物（不入库）
+.reasonix/
+.trae/
+.claude/
+.cursor/
+.codebuddy/
+CLAUDE.md
+AGENTS.md
