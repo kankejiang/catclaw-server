@@ -45,13 +45,13 @@
 
 | 层 | 技术 |
 |----|------|
-| 运行时 | .NET 8.0 (ASP.NET Core) |
-| 数据库 | SQLite via Entity Framework Core 8.0.11 |
-| 认证 | JWT Bearer (`Microsoft.AspNetCore.Authentication.JwtBearer` 8.0.11) + BCrypt 密码哈希 (`BCrypt.Net-Next` 4.0.3) |
+| 运行时 | .NET 11.0 (ASP.NET Core RC1) |
+| 数据库 | SQLite via Entity Framework Core 11.0.0-rc.1 |
+| 认证 | JWT Bearer (`Microsoft.AspNetCore.Authentication.JwtBearer` 11.0.0-rc.1) + BCrypt 密码哈希 (`BCrypt.Net-Next` 4.0.3) |
 | 音频标签 | TagLibSharp 2.3.0（ID3/FLAC/APE 等元数据读取） |
 | 转码 | FFmpeg（外部进程，HLS 分片 / 直出） |
 | API 文档 | Swashbuckle.AspNetCore 6.6.2 |
-| 限速 | .NET 8 内置 `System.Threading.RateLimiting`（每 IP 200 req/min） |
+| 限速 | .NET 内置 `System.Threading.RateLimiting`（每 IP 200 req/min） |
 | 前端 | Vue 3 + Vue Router 4（ESM import map）+ HLS.js |
 | 部署 | Docker（多阶段构建）+ GitHub Actions（GHCR 自动推送） |
 
@@ -770,7 +770,7 @@ services:
 
 ```bash
 dotnet publish CatClawMusicServer.csproj -c Release -r win-x64 --self-contained -o publish
-# 产物：publish/CatClawMusicServer.exe（约 110MB，捆绑 .NET 8 运行时）
+# 产物：publish/CatClawMusicServer.exe（约 110MB，捆绑 .NET 11 运行时）
 
 # 运行示例
 CatClawMusicServer.exe --music-dir "D:\Music" --token "强随机令牌" --port 37823

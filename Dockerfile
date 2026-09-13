@@ -1,12 +1,15 @@
-# 多阶段构建：.NET 8 SDK 编译 → ASP.NET Core 8 运行时 + FFmpeg
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+# 多阶段构建：.NET 11 SDK 编译 → ASP.NET Core 11 运行时 + FFmpeg
+# 版本对齐：sdk 用 11.0.100-rc.1（与 global.json 锁定值一致），
+# aspnet 浮动 tag 11.0 当前即 11.0.0-rc.1.26425.128，与 csproj 的 NuGet 包版本一致。
+FROM mcr.microsoft.com/dotnet/sdk:11.0.100-rc.1 AS build
 WORKDIR /src
 COPY CatClawMusicServer.csproj ./
+COPY global.json ./
 RUN dotnet restore CatClawMusicServer.csproj
 COPY . .
 RUN dotnet publish CatClawMusicServer.csproj -c Release -o /app/publish
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS runtime
 WORKDIR /app
 
 # 安装 FFmpeg（使用阿里云镜像加速）

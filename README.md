@@ -62,7 +62,7 @@ wwwroot/       → 静态文件（Web UI）
 ```
 
 ## 依赖
-- .NET 8.0
+- .NET 11.0 (ASP.NET Core, RC1)
 - Entity Framework Core (SQLite)
 - TagLibSharp (音频标签)
 - Swashbuckle (Swagger)
@@ -74,7 +74,7 @@ wwwroot/       → 静态文件（Web UI）
 ### 发布自包含 EXE
 ```bash
 dotnet publish CatClawMusicServer.csproj -c Release -r win-x64 --self-contained -o publish
-# 产物：publish/CatClawMusicServer.exe（约 110MB，已捆绑 .NET 8 运行时）
+# 产物：publish/CatClawMusicServer.exe（约 110MB，已捆绑 .NET 11 运行时）
 ```
 
 ### 命令行参数

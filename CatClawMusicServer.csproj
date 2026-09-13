@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>CatClawMusicServer</RootNamespace>
+    <!-- 版本号：首个 Release 基线。与 GitHub Release tag 保持同步。 -->
+    <Version>0.0.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
